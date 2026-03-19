@@ -1,9 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { format } from "date-fns";
+import { redirect } from "next/navigation";
+import { getCurrentResident } from "@/lib/auth";
+import { isFacilityManager } from "@/lib/auth-roles";
 import { getUnitDieselBalance } from "@/lib/utils";
 
 export default async function AdminOverviewPage() {
+  const resident = await getCurrentResident();
+  if (resident && isFacilityManager(resident.role)) {
+    redirect("/admin/requests");
+  }
+
   const supabase = await createClient();
 
   const { count: unitsCount } = await supabase

@@ -28,9 +28,11 @@ export default async function ResidentsPage() {
       id,
       unit_id,
       role,
+      phone,
       units (
         flat_number,
-        owner_name
+        owner_name,
+        phone
       )
     `
     );
@@ -41,7 +43,13 @@ export default async function ResidentsPage() {
     const flatA = getFlat(a);
     const flatB = getFlat(b);
     if (flatA !== flatB) return flatA.localeCompare(flatB, undefined, { numeric: true });
-    const roleOrder = { chairman: 0, treasurer: 1, secretary: 2, resident: 3 };
+    const roleOrder = {
+      chairman: 0,
+      treasurer: 1,
+      secretary: 2,
+      resident: 3,
+      facility_manager: 4,
+    };
     return roleOrder[a.role as keyof typeof roleOrder] - roleOrder[b.role as keyof typeof roleOrder];
   });
 
@@ -51,7 +59,9 @@ export default async function ResidentsPage() {
         Residents & Roles
       </h1>
       <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-        Change resident roles. Only the committees can update roles.
+        Change resident roles and optional WhatsApp numbers. Facility managers
+        use their auth email for request notifications; use the phone column
+        (or unit registry phone) for WhatsApp share links.
       </p>
       <ResidentsTable residents={sorted} />
     </div>

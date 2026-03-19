@@ -1,23 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
+import type { Resident } from "./auth-roles";
 
-export type ResidentRole = "resident" | "treasurer" | "secretary" | "chairman";
-
-export interface Resident {
-  id: string;
-  unit_id: string | null;
-  role: ResidentRole;
-  created_at: string;
-  units?: {
-    flat_number: string;
-    owner_name: string;
-  } | null;
-}
-
-const COMMITTEE_ROLES: ResidentRole[] = ["treasurer", "secretary", "chairman"];
-
-export function isCommittee(role: ResidentRole): boolean {
-  return COMMITTEE_ROLES.includes(role);
-}
+export type { Resident, ResidentRole } from "./auth-roles";
+export {
+  canAccessAdminArea,
+  isCommittee,
+  isFacilityManager,
+} from "./auth-roles";
 
 export async function getCurrentResident(): Promise<Resident | null> {
   const supabase = await createClient();
@@ -33,6 +22,7 @@ export async function getCurrentResident(): Promise<Resident | null> {
       id,
       unit_id,
       role,
+      phone,
       created_at,
       units (
         flat_number,

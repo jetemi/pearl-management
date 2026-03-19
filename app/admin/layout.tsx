@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentResident, isCommittee } from "@/lib/auth";
+import { getCurrentResident } from "@/lib/auth";
+import { canAccessAdminArea } from "@/lib/auth-roles";
 import { AdminNav } from "@/components/admin/admin-nav";
 
 export default async function AdminLayout({
@@ -13,7 +14,7 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
-  if (!isCommittee(resident.role)) {
+  if (!canAccessAdminArea(resident.role)) {
     redirect("/my");
   }
 
@@ -22,7 +23,7 @@ export default async function AdminLayout({
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <AdminNav estateName={estateName} />
+      <AdminNav estateName={estateName} role={resident.role} />
       <main className="flex-1 p-4 md:p-6">{children}</main>
     </div>
   );

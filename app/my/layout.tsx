@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentResident, isCommittee } from "@/lib/auth";
+import { getCurrentResident } from "@/lib/auth";
+import { canAccessAdminArea } from "@/lib/auth-roles";
 
 export default async function MyLayout({
   children,
@@ -15,7 +16,7 @@ export default async function MyLayout({
 
   const estateName =
     process.env.NEXT_PUBLIC_ESTATE_NAME ?? "Estate Management";
-  const showAdminLink = isCommittee(resident.role);
+  const showAdminLink = canAccessAdminArea(resident.role);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">

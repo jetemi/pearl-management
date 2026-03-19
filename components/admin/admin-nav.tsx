@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import type { ResidentRole } from "@/lib/auth-roles";
+import { isCommittee } from "@/lib/auth-roles";
 
-const navLinks = [
+const committeeNavLinks = [
   { href: "/my", label: "My page" },
   { href: "/admin", label: "Overview" },
+  { href: "/admin/requests", label: "Requests" },
   { href: "/admin/units", label: "Units" },
   { href: "/admin/diesel", label: "Diesel Fund" },
   { href: "/admin/service-charge", label: "Service Charge" },
@@ -15,11 +18,19 @@ const navLinks = [
   { href: "/admin/residents", label: "Residents" },
 ];
 
+const facilityManagerNavLinks = [
+  { href: "/my", label: "My page" },
+  { href: "/admin/requests", label: "Requests" },
+];
+
 export function AdminNav({
   estateName,
+  role,
 }: {
   estateName: string;
+  role: ResidentRole;
 }) {
+  const navLinks = isCommittee(role) ? committeeNavLinks : facilityManagerNavLinks;
   const [open, setOpen] = useState(false);
 
   return (

@@ -1,7 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { safeNextPath } from "@/lib/safe-next";
 
 const protectedPaths = ["/admin", "/my"];
+
+function isProtectedPath(pathname: string): boolean {
+  return (
+    protectedPaths.some((p) => pathname.startsWith(p)) || pathname === "/"
+  );
+}
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
@@ -29,16 +36,18 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isProtected =
-    protectedPaths.some((p) => request.nextUrl.pathname.startsWith(p)) ||
-    request.nextUrl.pathname === "/";
+  const pathname = request.nextUrl.pathname;
 
-  if (isProtected && !user && request.nextUrl.pathname !== "/login") {
-    return NextResponse.redirect(new URL("/login", request.url));
+  if (isProtectedPath(pathname) && !user && pathname !== "/login") {
+    const fullPath = pathname + request.nextUrl.search;
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", fullPath);
+    return NextResponse.redirect(loginUrl);
   }
 
-  if (user && request.nextUrl.pathname === "/login") {
-    return NextResponse.redirect(new URL("/my", request.url));
+  if (user && pathname === "/login") {
+    const next = safeNextPath(request.nextUrl.searchParams.get("next"));
+    return NextResponse.redirect(new URL(next, request.url));
   }
 
   return response;

@@ -1,5 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** Normalize Supabase joined `units` (object or single-element array). */
+export function flatNumberFromUnitsJoin(
+  units: { flat_number: string } | { flat_number: string }[] | null | undefined
+): string {
+  if (!units) return "—";
+  if (Array.isArray(units)) return units[0]?.flat_number ?? "—";
+  return units.flat_number ?? "—";
+}
+
 export interface DieselBalance {
   totalExpected: number;
   totalPaid: number;
@@ -135,6 +144,45 @@ export function generateWhatsAppDieselMessage(
   ].filter(Boolean);
   const message = lines.join("\n");
   return `https://wa.me/?text=${encodeURIComponent(message)}`;
+}
+
+/** Plain-text body for WhatsApp (same for every FM). */
+export function buildFacilityRequestWhatsAppMessageText(
+  title: string,
+  body: string,
+  requestUrl: string
+): string {
+  const estateName =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_ESTATE_NAME
+      ? process.env.NEXT_PUBLIC_ESTATE_NAME
+      : "Estate";
+  const maxBody = 1200;
+  const bodyTrim =
+    body.length > maxBody ? `${body.slice(0, maxBody)}…` : body;
+  const lines = [
+    `🏘️ *${estateName} — Resident request*`,
+    "",
+    `*${title}*`,
+    "",
+    bodyTrim,
+    "",
+    `Open in app: ${requestUrl}`,
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * WhatsApp deep link for a facility request.
+ * `phoneDigits` should be digits only (e.g. from DB); if too short, uses generic wa.me share.
+ */
+export function buildFacilityRequestWhatsAppUrl(
+  messageText: string,
+  phoneDigits: string | null | undefined
+): string {
+  const digits = (phoneDigits ?? "").replace(/\D/g, "");
+  const base =
+    digits.length >= 8 ? `https://wa.me/${digits}` : "https://wa.me/";
+  return `${base}?text=${encodeURIComponent(messageText)}`;
 }
 
 export function exportToCSV<T extends Record<string, unknown>>(
