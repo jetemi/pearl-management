@@ -12,7 +12,7 @@ export default async function ServiceChargePage() {
 
   const { data: units } = await supabase
     .from("units")
-    .select("id, flat_number, owner_name")
+    .select("id, flat_number, owner_name, email")
     .eq("is_active", true)
     .order("flat_number");
 
@@ -32,6 +32,7 @@ export default async function ServiceChargePage() {
         periods={periods ?? []}
         units={units ?? []}
         unitStatuses={unitStatuses}
+        unitsWithEmail={units ?? []}
       />
     </div>
   );

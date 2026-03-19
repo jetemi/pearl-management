@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
-import { formatCurrency, type DieselBalance } from "@/lib/utils";
+import { formatCurrency, generateWhatsAppDieselMessage, type DieselBalance } from "@/lib/utils";
+import { sendNewCycleAnnouncement } from "@/lib/actions/email";
 import { format } from "date-fns";
 
 interface UnitWithBalance {
@@ -111,7 +112,7 @@ export function DieselFundView({
         />
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setShowRecordPayment(true)}
           className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
@@ -124,6 +125,11 @@ export function DieselFundView({
         >
           Start new cycle
         </button>
+        <WhatsAppReminderButton
+          cycleNumber={currentCycle.cycle_number}
+          amountPerUnit={amountPerUnit}
+          unitBalances={unitBalances}
+        />
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -210,6 +216,48 @@ export function DieselFundView({
         />
       )}
     </div>
+  );
+}
+
+function WhatsAppReminderButton({
+  cycleNumber,
+  amountPerUnit,
+  unitBalances,
+}: {
+  cycleNumber: number;
+  amountPerUnit: number;
+  unitBalances: UnitWithBalance[];
+}) {
+  const defaulters = unitBalances
+    .filter((u) => u.balance.owedCycles > 0)
+    .map((u) => ({
+      flat: u.unit.flat_number,
+      owedCycles: u.balance.owedCycles,
+      owedAmount: u.balance.owedCycles * amountPerUnit,
+    }));
+  const paidFlats = unitBalances
+    .filter((u) => u.balance.owedCycles === 0)
+    .map((u) => u.unit.flat_number);
+  const bankDetails =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_BANK_DETAILS
+      ? process.env.NEXT_PUBLIC_BANK_DETAILS
+      : "Contact treasurer";
+  const url = generateWhatsAppDieselMessage(
+    cycleNumber,
+    defaulters,
+    bankDetails,
+    paidFlats
+  );
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 rounded-md border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+    >
+      <span aria-hidden>📱</span>
+      Generate WhatsApp reminder
+    </a>
   );
 }
 
@@ -437,6 +485,7 @@ function StartNewCycleModal({
   const [startDate, setStartDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
+  const [emailResidents, setEmailResidents] = useState(true);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -463,7 +512,20 @@ function StartNewCycleModal({
         created_by: user?.id ?? null,
       });
       if (error) throw error;
-      toast.success("New cycle started");
+      if (emailResidents) {
+        const result = await sendNewCycleAnnouncement(
+          nextCycleNumber,
+          parseFloat(amount),
+          startDate
+        );
+        if (result.success) {
+          toast.success("New cycle started and residents emailed");
+        } else {
+          toast.success("New cycle started (email not sent — check RESEND_API_KEY)");
+        }
+      } else {
+        toast.success("New cycle started");
+      }
       onStarted();
       router.refresh();
     } catch (err) {
@@ -508,6 +570,15 @@ function StartNewCycleModal({
               required
             />
           </div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={emailResidents}
+              onChange={(e) => setEmailResidents(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm">Email residents about new cycle</span>
+          </label>
           <div className="flex justify-end gap-2">
             <button
               type="button"

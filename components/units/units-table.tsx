@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
-import { addUnit, addResidentToUnit } from "@/lib/actions/units";
+import { addUnit, addResidentToUnit, importUnitsFromCSV } from "@/lib/actions/units";
 
 export interface Unit {
   id: string;
@@ -282,6 +282,157 @@ export function AddUnitButton() {
         />
       )}
     </>
+  );
+}
+
+export function ImportUnitsButton() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Import CSV
+      </button>
+      {open && (
+        <ImportUnitsModal
+          onClose={() => setOpen(false)}
+          onImported={() => {
+            setOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ImportUnitsModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<{ flat: string; success: boolean; error?: string }[] | null>(null);
+
+  function parseCSV(text: string): { flat_number: string; owner_name: string; phone: string | null; email: string | null }[] {
+    const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length === 0) return [];
+
+    const parseRow = (row: string) => {
+      const values: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < row.length; i++) {
+        const c = row[i];
+        if (c === '"') {
+          inQuotes = !inQuotes;
+        } else if ((c === "," && !inQuotes) || (c === "\t" && !inQuotes)) {
+          values.push(current.trim());
+          current = "";
+        } else {
+          current += c;
+        }
+      }
+      values.push(current.trim());
+      return values;
+    };
+
+    const rows = lines.map(parseRow);
+    const header = rows[0].map((h) => h.toLowerCase().replace(/\s+/g, "_"));
+    const flatIdx = header.findIndex((h) => h === "flat_number" || h === "flat");
+    const ownerIdx = header.findIndex((h) => h === "owner_name" || h === "owner");
+    const phoneIdx = header.findIndex((h) => h === "phone");
+    const emailIdx = header.findIndex((h) => h === "email");
+
+    const hasHeader =
+      flatIdx >= 0 ||
+      ownerIdx >= 0 ||
+      (header[0]?.includes("flat") || header[1]?.includes("owner"));
+    const dataRows = hasHeader ? rows.slice(1) : rows;
+
+    return dataRows.map((vals) => ({
+      flat_number: (flatIdx >= 0 ? vals[flatIdx] : vals[0]) ?? "",
+      owner_name: (ownerIdx >= 0 ? vals[ownerIdx] : vals[1]) ?? "",
+      phone: phoneIdx >= 0 && vals[phoneIdx] ? vals[phoneIdx] : null,
+      email: emailIdx >= 0 && vals[emailIdx] ? vals[emailIdx] : null,
+    }));
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setResults(null);
+    setLoading(true);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) {
+        setError("No valid rows found. CSV should have columns: flat_number, owner_name, phone, email");
+        setLoading(false);
+        return;
+      }
+      const res = await importUnitsFromCSV(rows);
+      setResults(res);
+      const successCount = res.filter((r) => r.success).length;
+      if (successCount > 0) {
+        toast.success(`Imported ${successCount} unit(s)`);
+        onImported();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+      toast.error("Import failed");
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-4 text-lg font-semibold">Import units from CSV</h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          CSV should have columns: <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">flat_number</code>,{" "}
+          <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">owner_name</code>,{" "}
+          <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">phone</code>,{" "}
+          <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">email</code>
+        </p>
+        <input
+          type="file"
+          accept=".csv"
+          onChange={handleFile}
+          disabled={loading}
+          className="mb-4 block w-full text-sm"
+        />
+        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+        {results && (
+          <div className="mb-4 max-h-40 overflow-y-auto rounded border border-zinc-200 p-2 text-xs dark:border-zinc-700">
+            {results.map((r, i) => (
+              <div key={i} className={r.success ? "text-emerald-600" : "text-red-600"}>
+                {r.flat}: {r.success ? "OK" : r.error}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded px-4 py-2 text-zinc-600 hover:text-zinc-800"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -97,14 +97,24 @@ export function ReportsView({
     downloadCSV(csv, "facility-performance.csv");
   };
 
+  const handlePrint = () => window.print();
+
   return (
-    <div className="space-y-8">
-      <section>
-        <div className="mb-3 flex items-center justify-between">
+    <div className="space-y-8 print:space-y-6">
+      <div className="mb-4 flex flex-wrap items-center gap-2 print:hidden">
+        <button
+          onClick={handlePrint}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Print for AGM
+        </button>
+      </div>
+      <section className="break-inside-avoid">
+        <div className="mb-3 flex items-center justify-between print:justify-start">
           <h2 className="text-lg font-semibold">Diesel fund</h2>
           <button
             onClick={handleExportDiesel}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 print:hidden dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Export CSV
           </button>
@@ -173,15 +183,15 @@ export function ReportsView({
         </div>
       </section>
 
-      <section>
+      <section className="break-inside-avoid">
         <h2 className="mb-3 text-lg font-semibold">Service charge</h2>
         {serviceChargeReport.map(({ period, unitStatuses }) => (
           <div key={period.id} className="mb-6">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between print:justify-start">
               <span className="font-medium">{period.period_label}</span>
               <button
                 onClick={() => handleExportServiceCharge(period.period_label, unitStatuses)}
-                className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50 print:hidden dark:border-zinc-600 dark:hover:bg-zinc-800"
               >
                 Export CSV
               </button>
@@ -228,12 +238,12 @@ export function ReportsView({
         ))}
       </section>
 
-      <section>
-        <div className="mb-3 flex items-center justify-between">
+      <section className="break-inside-avoid">
+        <div className="mb-3 flex items-center justify-between print:justify-start">
           <h2 className="text-lg font-semibold">Facility performance</h2>
           <button
             onClick={handleExportFacility}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 print:hidden dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Export CSV
           </button>

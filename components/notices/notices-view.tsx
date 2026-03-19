@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
+import { sendNoticeToResidents } from "@/lib/actions/email";
 
 interface Notice {
   id: string;
@@ -57,7 +58,8 @@ export function NoticesView({ notices }: { notices: Notice[] }) {
                   <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">
                     {notice.title}
                   </h3>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <EmailNoticeButton noticeId={notice.id} />
                     <button
                       onClick={() => setEditingId(notice.id)}
                       className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
@@ -92,6 +94,40 @@ export function NoticesView({ notices }: { notices: Notice[] }) {
         />
       )}
     </div>
+  );
+}
+
+function EmailNoticeButton({ noticeId }: { noticeId: string }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleClick() {
+    setLoading(true);
+    try {
+      const result = await sendNoticeToResidents(noticeId);
+      if (result.success) {
+        toast.success("Notice emailed to all residents");
+      } else {
+        toast.error(
+          typeof result.error === "string"
+            ? result.error
+            : "Failed to send emails"
+        );
+      }
+    } catch {
+      toast.error("Failed to send emails");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 disabled:opacity-50"
+    >
+      {loading ? "Sending…" : "Email to residents"}
+    </button>
   );
 }
 
@@ -206,7 +242,6 @@ function EditNoticeForm({
       if (error) throw error;
       toast.success("Notice updated");
       onSaved();
-      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update");
     } finally {
@@ -269,7 +304,6 @@ function DeleteNoticeButton({
       if (error) throw error;
       toast.success("Notice deleted");
       onDeleted();
-      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete");
     } finally {

@@ -74,3 +74,38 @@ export async function addResidentToUnit(unitId: string, email: string) {
   }
   return { success: true };
 }
+
+export async function importUnitsFromCSV(
+  rows: { flat_number: string; owner_name: string; phone: string | null; email: string | null }[]
+) {
+  const supabase = await createClient();
+  const results: { flat: string; success: boolean; error?: string }[] = [];
+
+  for (const row of rows) {
+    const flat = row.flat_number?.trim() ?? "";
+    const owner = row.owner_name?.trim() ?? "";
+    if (!flat || !owner) {
+      results.push({ flat: flat || "(empty)", success: false, error: "Missing flat or owner" });
+      continue;
+    }
+
+    const { error } = await supabase.from("units").insert({
+      flat_number: flat,
+      owner_name: owner,
+      phone: row.phone?.trim() || null,
+      email: row.email?.trim() || null,
+    });
+
+    if (error) {
+      results.push({
+        flat,
+        success: false,
+        error: error.code === "23505" ? "Duplicate flat number" : error.message,
+      });
+    } else {
+      results.push({ flat, success: true });
+    }
+  }
+
+  return results;
+}

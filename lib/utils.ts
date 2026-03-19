@@ -104,6 +104,39 @@ export async function getUnitServiceChargeStatus(
   });
 }
 
+export function generateWhatsAppDieselMessage(
+  cycleNumber: number,
+  defaulters: { flat: string; owedCycles: number; owedAmount: number }[],
+  bankDetails: string,
+  paidFlats: string[]
+) {
+  const estateName =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_ESTATE_NAME
+      ? process.env.NEXT_PUBLIC_ESTATE_NAME
+      : "Estate";
+  const lines = [
+    `🏘️ *${estateName} — Diesel Fund Cycle ${cycleNumber}*`,
+    "",
+    defaulters.length === 0
+      ? "✅ All units have paid. Thank you!"
+      : `⚠️ *Outstanding (${defaulters.length} units):*`,
+    ...defaulters.map(
+      (d) =>
+        `- ${d.flat}: ${d.owedCycles} cycle(s) = ₦${d.owedAmount.toLocaleString()}`
+    ),
+    defaulters.length > 0 ? "" : null,
+    paidFlats.length > 0 && defaulters.length > 0
+      ? `✅ Paid: ${paidFlats.join(", ")}`
+      : null,
+    "",
+    `Please pay to: ${bankDetails}`,
+    "",
+    "Thank you 🙏",
+  ].filter(Boolean);
+  const message = lines.join("\n");
+  return `https://wa.me/?text=${encodeURIComponent(message)}`;
+}
+
 export function exportToCSV<T extends Record<string, unknown>>(
   rows: T[],
   columns: { key: keyof T; header: string }[]

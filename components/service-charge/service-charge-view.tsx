@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { formatCurrency, type ServiceChargePeriodStatus } from "@/lib/utils";
 import { format } from "date-fns";
 import { exportToCSV } from "@/lib/utils";
+import { sendServiceChargeOverdueReminder } from "@/lib/actions/email";
 
 interface UnitStatus {
   unit: { id: string; flat_number: string; owner_name: string };
@@ -25,10 +26,12 @@ export function ServiceChargeView({
   periods,
   units,
   unitStatuses,
+  unitsWithEmail,
 }: {
   periods: Period[];
   units: { id: string; flat_number: string; owner_name: string }[];
   unitStatuses: UnitStatus[];
+  unitsWithEmail: { id: string; flat_number: string; owner_name: string; email: string | null }[];
 }) {
   const router = useRouter();
   const [showNewPeriod, setShowNewPeriod] = useState(false);
@@ -48,6 +51,13 @@ export function ServiceChargeView({
     const s = us.status.find((sp) => sp.periodId === selectedPeriodId);
     return s && !s.paid;
   });
+
+  const defaultersWithEmail = defaultersForPeriod
+    .map(({ unit }) => {
+      const u = unitsWithEmail.find((x) => x.id === unit.id);
+      return u ? { ...unit, email: u.email } : null;
+    })
+    .filter((u): u is { id: string; flat_number: string; owner_name: string; email: string | null } => !!u);
 
   const handleExportDefaulters = () => {
     if (!selectedPeriod) return;
@@ -89,12 +99,19 @@ export function ServiceChargeView({
           Record payment
         </button>
         {selectedPeriod && defaultersForPeriod.length > 0 && (
-          <button
-            onClick={handleExportDefaulters}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            Export defaulters CSV
-          </button>
+          <>
+            <button
+              onClick={handleExportDefaulters}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              Export defaulters CSV
+            </button>
+            <EmailDefaultersButton
+              periodLabel={selectedPeriod.period_label}
+              amountPerUnit={Number(selectedPeriod.amount_per_unit)}
+              defaulters={defaultersWithEmail}
+            />
+          </>
         )}
       </div>
 
@@ -226,6 +243,63 @@ export function ServiceChargeView({
         />
       )}
     </div>
+  );
+}
+
+function EmailDefaultersButton({
+  periodLabel,
+  amountPerUnit,
+  defaulters,
+}: {
+  periodLabel: string;
+  amountPerUnit: number;
+  defaulters: { flat_number: string; owner_name: string; email: string | null }[];
+}) {
+  const [loading, setLoading] = useState(false);
+  const withEmail = defaulters.filter((d) => d.email?.includes("@"));
+
+  async function handleClick() {
+    if (withEmail.length === 0) {
+      toast.error("No defaulters have email addresses");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await sendServiceChargeOverdueReminder(
+        periodLabel,
+        amountPerUnit,
+        withEmail.map((d) => ({
+          flat_number: d.flat_number,
+          owner_name: d.owner_name,
+          email: d.email!,
+        }))
+      );
+      if (result.success) {
+        toast.success(`Reminder sent to ${withEmail.length} resident(s)`);
+      } else {
+        toast.error(
+          typeof result.error === "string"
+            ? result.error
+            : "Failed to send emails"
+        );
+      }
+    } catch {
+      toast.error("Failed to send emails");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (withEmail.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className="rounded-md border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 dark:border-blue-500 dark:text-blue-400 dark:hover:bg-blue-900/20 disabled:opacity-50"
+    >
+      {loading ? "Sending…" : `Email ${withEmail.length} defaulter(s)`}
+    </button>
   );
 }
 
