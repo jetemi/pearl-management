@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentResident } from "@/lib/auth";
+import { getCurrentResident, isCommittee } from "@/lib/auth";
 
 export default async function MyLayout({
   children,
@@ -15,6 +15,7 @@ export default async function MyLayout({
 
   const estateName =
     process.env.NEXT_PUBLIC_ESTATE_NAME ?? "Estate Management";
+  const showAdminLink = isCommittee(resident.role);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -23,14 +24,24 @@ export default async function MyLayout({
           <h1 className="font-semibold text-zinc-900 dark:text-zinc-100">
             {estateName}
           </h1>
-          <form action="/auth/signout" method="post">
-            <button
-              type="submit"
-              className="text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
-            >
-              Sign out
-            </button>
-          </form>
+          <nav className="flex items-center gap-4">
+            {showAdminLink && (
+              <Link
+                href="/admin"
+                className="text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Admin
+              </Link>
+            )}
+            <form action="/auth/signout" method="post">
+              <button
+                type="submit"
+                className="text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              >
+                Sign out
+              </button>
+            </form>
+          </nav>
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-4 py-6">{children}</main>

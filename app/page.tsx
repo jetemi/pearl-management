@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentResident, isCommittee } from "@/lib/auth";
+import { getCurrentResident } from "@/lib/auth";
 
 export default async function HomePage() {
   const resident = await getCurrentResident();
@@ -8,9 +8,6 @@ export default async function HomePage() {
     redirect("/login");
   }
 
-  if (isCommittee(resident.role)) {
-    redirect("/admin");
-  }
-
+  // /my is the default for all users (residents and committee)
   redirect("/my");
 }
