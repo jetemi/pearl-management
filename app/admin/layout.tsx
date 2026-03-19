@@ -45,6 +45,36 @@ export default async function AdminLayout({
           >
             Diesel Fund
           </Link>
+          <Link
+            href="/admin/service-charge"
+            className="rounded px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Service Charge
+          </Link>
+          <Link
+            href="/admin/facility"
+            className="rounded px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Facility
+          </Link>
+          <Link
+            href="/admin/reports"
+            className="rounded px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Reports
+          </Link>
+          <Link
+            href="/admin/notices"
+            className="rounded px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Notices
+          </Link>
+          <Link
+            href="/admin/residents"
+            className="rounded px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Residents
+          </Link>
         </nav>
         <div className="mt-auto pt-4">
           <form action="/auth/signout" method="post">

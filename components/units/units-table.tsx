@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
-import { addUnit } from "@/lib/actions/units";
+import { addUnit, addResidentToUnit } from "@/lib/actions/units";
 
 export interface Unit {
   id: string;
@@ -122,6 +122,9 @@ export function UnitsTable({ units }: { units: Unit[] }) {
                 >
                   {unit.is_active ? "Deactivate" : "Activate"}
                 </button>
+                {unit.is_active && (
+                  <AddResidentButton unit={unit} />
+                )}
                 <EditUnitButton
                   unit={unit}
                   editing={editing === unit.id}
@@ -235,6 +238,32 @@ function EditUnitForm({
   );
 }
 
+function AddResidentButton({ unit }: { unit: Unit }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="mr-2 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+      >
+        Add resident
+      </button>
+      {open && (
+        <AddResidentModal
+          unit={unit}
+          onClose={() => setOpen(false)}
+          onAdded={() => {
+            setOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 export function AddUnitButton() {
   const [open, setOpen] = useState(false);
 
@@ -253,6 +282,76 @@ export function AddUnitButton() {
         />
       )}
     </>
+  );
+}
+
+function AddResidentModal({
+  unit,
+  onClose,
+  onAdded,
+}: {
+  unit: Unit;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setLoading(true);
+    try {
+      await addResidentToUnit(unit.id, email.trim());
+      toast.success("Resident added to unit");
+      onAdded();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add resident");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-4 text-lg font-semibold">
+          Add resident to {unit.flat_number}
+        </h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded border px-3 py-2"
+              placeholder="resident@example.com"
+              required
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              They must have signed up via /login first.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-4 py-2 text-zinc-600 hover:text-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {loading ? "Adding..." : "Add"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

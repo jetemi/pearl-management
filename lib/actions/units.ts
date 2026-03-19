@@ -41,3 +41,36 @@ export async function addUnit(data: {
 
   return { id: newUnit.id };
 }
+
+export async function addResidentToUnit(unitId: string, email: string) {
+  const supabase = await createClient();
+
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail) throw new Error("Email is required");
+
+  const { data: userId } = await supabase.rpc("get_auth_user_id_by_email", {
+    user_email: trimmedEmail,
+  });
+
+  if (!userId) {
+    throw new Error(
+      "No account found with this email. They must sign up at /login first, then you can link them."
+    );
+  }
+
+  const { error } = await supabase.from("residents").insert({
+    id: userId,
+    unit_id: unitId,
+    role: "resident",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error(
+        "This person is already linked to a unit. Ask chairman to reassign."
+      );
+    }
+    throw error;
+  }
+  return { success: true };
+}
