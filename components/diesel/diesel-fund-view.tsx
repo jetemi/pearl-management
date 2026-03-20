@@ -4,7 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
-import { formatCurrency, generateWhatsAppDieselMessage, type DieselBalance } from "@/lib/utils";
+import {
+  formatCurrency,
+  generateWhatsAppDieselMessage,
+  type DieselBalance,
+  type DieselPoolTotals,
+} from "@/lib/utils";
 import { sendNewCycleAnnouncement } from "@/lib/actions/email";
 import { format } from "date-fns";
 
@@ -22,20 +27,59 @@ interface DieselCycle {
   notes: string | null;
 }
 
+interface DieselExpenditureRow {
+  id: string;
+  amount: number;
+  expense_date: string;
+  notes: string | null;
+  cycle_id: string;
+}
+
 export function DieselFundView({
   currentCycle,
   pastCycles,
   unitBalances,
+  poolTotals,
+  recentExpenditures,
+  activeUnitCount,
 }: {
   currentCycle: DieselCycle | null;
   pastCycles: DieselCycle[];
   unitBalances: UnitWithBalance[];
+  poolTotals: DieselPoolTotals;
+  recentExpenditures: DieselExpenditureRow[];
+  activeUnitCount: number;
 }) {
   const router = useRouter();
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showNewCycle, setShowNewCycle] = useState(false);
+  const [showRecordPurchase, setShowRecordPurchase] = useState(false);
 
-  if (!currentCycle && unitBalances.length > 0) {
+  if (activeUnitCount === 0) {
+    return (
+      <div className="rounded-lg border border-zinc-200 p-6 dark:border-zinc-800">
+        <p className="text-zinc-600 dark:text-zinc-400">
+          No units registered yet. Add units first, then start a diesel cycle.
+        </p>
+      </div>
+    );
+  }
+
+  if (unitBalances.length === 0) {
+    return (
+      <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50 p-6 dark:border-amber-900 dark:bg-amber-900/20">
+        <p className="text-amber-800 dark:text-amber-200">
+          Every active unit is marked <strong>off</strong> the diesel generator.
+          Turn <strong>On generator</strong> for at least one unit under{" "}
+          <span className="font-medium">Admin → Units</span> to manage diesel
+          here.
+        </p>
+        {pastCycles.length > 0 && <CycleHistory cycles={pastCycles} />}
+      </div>
+    );
+  }
+
+  if (!currentCycle) {
     const nextCycleNum =
       pastCycles.length > 0
         ? Math.max(...pastCycles.map((c) => c.cycle_number)) + 1
@@ -69,24 +113,23 @@ export function DieselFundView({
     );
   }
 
-  if (!currentCycle) {
-    return (
-      <div className="rounded-lg border border-zinc-200 p-6 dark:border-zinc-800">
-        <p className="text-zinc-600 dark:text-zinc-400">
-          No units registered yet. Add units first, then start a diesel cycle.
-        </p>
-      </div>
-    );
-  }
-
   const amountPerUnit = Number(currentCycle.amount_per_unit);
-  const totalExpected = unitBalances.reduce((s, u) => s + u.balance.totalExpected, 0);
-  const totalPaid = unitBalances.reduce((s, u) => s + u.balance.totalPaid, 0);
-  const totalOutstanding = totalExpected - totalPaid;
-  const paidCount = unitBalances.filter(
+  const cumulativeExpected = unitBalances.reduce(
+    (s, u) => s + u.balance.totalExpected,
+    0
+  );
+  const cumulativePaid = unitBalances.reduce(
+    (s, u) => s + u.balance.totalPaid,
+    0
+  );
+  const totalOutstandingCumulative = Math.max(
+    0,
+    cumulativeExpected - cumulativePaid
+  );
+  const paidUpCount = unitBalances.filter(
     (u) => u.balance.balance >= 0 || u.balance.totalExpected === 0
   ).length;
-  const unpaidCount = unitBalances.length - paidCount;
+  const owingCount = unitBalances.length - paidUpCount;
 
   return (
     <div className="space-y-6">
@@ -94,22 +137,49 @@ export function DieselFundView({
         <StatCard
           title="Current cycle"
           value={`#${currentCycle.cycle_number}`}
-          sub={`₦${amountPerUnit.toLocaleString()} per unit`}
+          sub={`₦${amountPerUnit.toLocaleString()} per unit · ${unitBalances.length} on generator`}
         />
         <StatCard
-          title="Collected"
-          value={formatCurrency(totalPaid)}
-          sub={`${paidCount} units paid`}
+          title="Collected this cycle"
+          value={formatCurrency(poolTotals.collectedThisCycle)}
+          sub={`${paidUpCount} units paid up (cumulative)`}
         />
         <StatCard
-          title="Outstanding"
-          value={formatCurrency(totalOutstanding)}
-          sub={`${unpaidCount} units owing`}
+          title="Outstanding (cumulative)"
+          value={formatCurrency(totalOutstandingCumulative)}
+          sub={`${owingCount} units owing`}
         />
         <StatCard
           title="Started"
           value={format(new Date(currentCycle.started_at), "MMM d, yyyy")}
         />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+          Estate diesel cash (contributions − purchases)
+        </h2>
+        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+          Per-unit owing is unchanged when you record a purchase; this is the
+          pool left after buying diesel.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <StatCard
+            title="Purchases this cycle"
+            value={formatCurrency(poolTotals.purchasesThisCycle)}
+            sub="Diesel bought (this cycle)"
+          />
+          <StatCard
+            title="Net this cycle"
+            value={formatCurrency(poolTotals.netThisCycle)}
+            sub="Can be negative if spend &gt; collected"
+          />
+          <StatCard
+            title="Net fund (all time)"
+            value={formatCurrency(poolTotals.netLifetime)}
+            sub={`Lifetime in: ${formatCurrency(poolTotals.lifetimeCollected)} · out: ${formatCurrency(poolTotals.lifetimePurchases)}`}
+          />
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -118,6 +188,12 @@ export function DieselFundView({
           className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Record payment
+        </button>
+        <button
+          onClick={() => setShowRecordPurchase(true)}
+          className="rounded-md bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-600 dark:hover:bg-zinc-500"
+        >
+          Record diesel purchase
         </button>
         <button
           onClick={() => setShowNewCycle(true)}
@@ -129,6 +205,7 @@ export function DieselFundView({
           cycleNumber={currentCycle.cycle_number}
           amountPerUnit={amountPerUnit}
           unitBalances={unitBalances}
+          participatingCount={unitBalances.length}
         />
       </div>
 
@@ -146,6 +223,12 @@ export function DieselFundView({
                 Status
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                This cycle
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                Lifetime paid
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
                 Balance
               </th>
             </tr>
@@ -160,7 +243,13 @@ export function DieselFundView({
                   {unit.owner_name}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge balance={balance} amountPerUnit={amountPerUnit} />
+                  <StatusBadge balance={balance} />
+                </td>
+                <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                  {formatCurrency(balance.paidCurrentCycle)}
+                </td>
+                <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                  {formatCurrency(balance.totalPaid)}
                 </td>
                 <td className="px-4 py-3 text-right text-sm">
                   {balance.balance < 0 ? (
@@ -181,9 +270,45 @@ export function DieselFundView({
         </table>
       </div>
 
-      {pastCycles.length > 0 && (
-        <CycleHistory cycles={pastCycles} />
+      {recentExpenditures.length > 0 && (
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Recent diesel purchases</h2>
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-800">
+              <thead className="bg-zinc-50 dark:bg-zinc-900">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                    Amount
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                    Notes
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
+                {recentExpenditures.map((ex) => (
+                  <tr key={ex.id}>
+                    <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+                      {format(new Date(ex.expense_date), "MMM d, yyyy")}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      {formatCurrency(Number(ex.amount))}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                      {ex.notes ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
+
+      {pastCycles.length > 0 && <CycleHistory cycles={pastCycles} />}
 
       {showRecordPayment && (
         <RecordPaymentModal
@@ -194,6 +319,18 @@ export function DieselFundView({
           onClose={() => setShowRecordPayment(false)}
           onRecorded={() => {
             setShowRecordPayment(false);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {showRecordPurchase && (
+        <RecordDieselPurchaseModal
+          cycleId={currentCycle.id}
+          cycleNumber={currentCycle.cycle_number}
+          onClose={() => setShowRecordPurchase(false)}
+          onRecorded={() => {
+            setShowRecordPurchase(false);
             router.refresh();
           }}
         />
@@ -223,10 +360,12 @@ function WhatsAppReminderButton({
   cycleNumber,
   amountPerUnit,
   unitBalances,
+  participatingCount,
 }: {
   cycleNumber: number;
   amountPerUnit: number;
   unitBalances: UnitWithBalance[];
+  participatingCount: number;
 }) {
   const defaulters = unitBalances
     .filter((u) => u.balance.owedCycles > 0)
@@ -246,7 +385,8 @@ function WhatsAppReminderButton({
     cycleNumber,
     defaulters,
     bankDetails,
-    paidFlats
+    paidFlats,
+    participatingCount
   );
   return (
     <a
@@ -285,13 +425,14 @@ function StatCard({
   );
 }
 
-function StatusBadge({
-  balance,
-  amountPerUnit,
-}: {
-  balance: DieselBalance;
-  amountPerUnit: number;
-}) {
+function StatusBadge({ balance }: { balance: DieselBalance }) {
+  if (balance.dieselNotApplicable) {
+    return (
+      <span className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+        N/A
+      </span>
+    );
+  }
   if (balance.owedCycles > 0) {
     return (
       <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
@@ -324,7 +465,8 @@ function CycleHistory({ cycles }: { cycles: DieselCycle[] }) {
             className="flex items-center justify-between rounded border border-zinc-200 px-4 py-2 dark:border-zinc-800"
           >
             <span>
-              Cycle #{c.cycle_number} — ₦{Number(c.amount_per_unit).toLocaleString()}/unit
+              Cycle #{c.cycle_number} — ₦
+              {Number(c.amount_per_unit).toLocaleString()}/unit
             </span>
             <span className="text-sm text-zinc-500">
               {format(new Date(c.started_at), "MMM yyyy")} –{" "}
@@ -469,6 +611,117 @@ function RecordPaymentModal({
   );
 }
 
+function RecordDieselPurchaseModal({
+  cycleId,
+  cycleNumber,
+  onClose,
+  onRecorded,
+}: {
+  cycleId: string;
+  cycleNumber: number;
+  onClose: () => void;
+  onRecorded: () => void;
+}) {
+  const router = useRouter();
+  const [amount, setAmount] = useState("");
+  const [expenseDate, setExpenseDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const n = parseFloat(amount);
+    if (!n || n <= 0) return;
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const { error } = await supabase.from("diesel_expenditures").insert({
+        cycle_id: cycleId,
+        amount: n,
+        expense_date: expenseDate,
+        notes: notes.trim() || null,
+        recorded_by: user?.id ?? null,
+      });
+      if (error) throw error;
+      toast.success("Purchase recorded");
+      onRecorded();
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to record");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-4 text-lg font-semibold">
+          Record diesel purchase — Cycle #{cycleNumber}
+        </h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          Reduces the estate cash pool for this cycle and overall. Does not
+          change per-unit amounts owed.
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Cost (₦)</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded border px-3 py-2"
+              min="0"
+              step="0.01"
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Purchase date</label>
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              className="w-full rounded border px-3 py-2"
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Notes</label>
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full rounded border px-3 py-2"
+              placeholder="Supplier, litres, invoice ref…"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-4 py-2 text-zinc-600 hover:text-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded bg-zinc-800 px-4 py-2 text-white hover:bg-zinc-900 disabled:opacity-50 dark:bg-zinc-600"
+            >
+              {loading ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function StartNewCycleModal({
   nextCycleNumber,
   currentCycleId,
@@ -521,7 +774,9 @@ function StartNewCycleModal({
         if (result.success) {
           toast.success("New cycle started and residents emailed");
         } else {
-          toast.success("New cycle started (email not sent — check RESEND_API_KEY)");
+          toast.success(
+            "New cycle started (email not sent — check RESEND_API_KEY)"
+          );
         }
       } else {
         toast.success("New cycle started");
@@ -539,6 +794,10 @@ function StartNewCycleModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
         <h3 className="mb-4 text-lg font-semibold">Start new cycle</h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          Balances are cumulative: units that still owe from earlier cycles
+          continue to owe until they pay. Units ahead keep their credit.
+        </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium">

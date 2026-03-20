@@ -13,6 +13,8 @@ export interface Unit {
   phone: string | null;
   email: string | null;
   is_active: boolean;
+  /** When omitted (pre-migration), treat as true. */
+  diesel_participates?: boolean;
   created_at: string;
 }
 
@@ -42,7 +44,9 @@ export function UnitsTable({ units }: { units: Unit[] }) {
 
   async function handleUpdate(
     id: string,
-    data: Partial<Pick<Unit, "flat_number" | "owner_name" | "phone" | "email">>
+    data: Partial<
+      Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">
+    >
   ) {
     const supabase = createClient();
     const { error } = await supabase.from("units").update(data).eq("id", id);
@@ -75,6 +79,9 @@ export function UnitsTable({ units }: { units: Unit[] }) {
               Email
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+              Diesel gen.
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
               Status
             </th>
             <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
@@ -103,6 +110,13 @@ export function UnitsTable({ units }: { units: Unit[] }) {
               </td>
               <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
                 {unit.email ?? "—"}
+              </td>
+              <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                {unit.diesel_participates ?? true ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">Yes</span>
+                ) : (
+                  <span className="text-zinc-400">No</span>
+                )}
               </td>
               <td className="px-4 py-3">
                 <span
@@ -157,7 +171,7 @@ function EditUnitButton({
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
-  onSave: (data: Partial<Unit>) => void;
+  onSave: (data: Partial<Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">>) => void;
 }) {
   if (!editing) {
     return (
@@ -184,16 +198,17 @@ function EditUnitForm({
   onCancel,
 }: {
   unit: Unit;
-  onSave: (data: Partial<Unit>) => void;
+  onSave: (data: Partial<Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">>) => void;
   onCancel: () => void;
 }) {
   const [flat, setFlat] = useState(unit.flat_number);
   const [owner, setOwner] = useState(unit.owner_name);
   const [phone, setPhone] = useState(unit.phone ?? "");
   const [email, setEmail] = useState(unit.email ?? "");
+  const [diesel, setDiesel] = useState(unit.diesel_participates ?? true);
 
   return (
-    <div className="inline-flex gap-2">
+    <div className="inline-flex flex-wrap items-center gap-2">
       <input
         value={flat}
         onChange={(e) => setFlat(e.target.value)}
@@ -218,6 +233,15 @@ function EditUnitForm({
         className="w-36 rounded border px-2 py-1 text-sm"
         placeholder="Email"
       />
+      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+        <input
+          type="checkbox"
+          checked={diesel}
+          onChange={(e) => setDiesel(e.target.checked)}
+          className="rounded"
+        />
+        On generator
+      </label>
       <button
         onClick={() =>
           onSave({
@@ -225,6 +249,7 @@ function EditUnitForm({
             owner_name: owner,
             phone: phone || null,
             email: email || null,
+            diesel_participates: diesel,
           })
         }
         className="text-sm text-emerald-600 hover:text-emerald-700"
@@ -518,6 +543,7 @@ function AddUnitModal({
   const [owner, setOwner] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [dieselParticipates, setDieselParticipates] = useState(true);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -530,6 +556,7 @@ function AddUnitModal({
         owner_name: owner.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
+        diesel_participates: dieselParticipates,
       });
       toast.success("Unit added");
       onAdded();
@@ -585,6 +612,15 @@ function AddUnitModal({
               placeholder="owner@example.com"
             />
           </div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={dieselParticipates}
+              onChange={(e) => setDieselParticipates(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm">On diesel generator (contributes to diesel fund)</span>
+          </label>
           <div className="flex justify-end gap-2">
             <button
               type="button"

@@ -57,12 +57,17 @@ export async function sendNewCycleAnnouncement(
 
   const { data: units } = await supabase
     .from("units")
-    .select("email")
+    .select("email, diesel_participates")
     .eq("is_active", true);
 
-  const recipients = (units ?? []).filter(
-    (u): u is { email: string } => !!u.email && u.email.includes("@")
-  );
+  const recipients = (units ?? [])
+    .filter(
+      (u) =>
+        !!u.email &&
+        u.email.includes("@") &&
+        (u.diesel_participates ?? true)
+    )
+    .map((u) => ({ email: u.email as string }));
 
   const bankDetails =
     process.env.NEXT_PUBLIC_BANK_DETAILS ?? "Contact treasurer";

@@ -51,11 +51,16 @@ export default async function MyDashboardPage() {
   const supabase = await createClient();
   const { data: unit } = await supabase
     .from("units")
-    .select("flat_number, owner_name")
+    .select("flat_number, owner_name, diesel_participates")
     .eq("id", resident.unit_id)
     .single();
 
-  const balance = await getUnitDieselBalance(supabase, resident.unit_id);
+  const dieselParticipates = unit?.diesel_participates ?? true;
+  const balance = await getUnitDieselBalance(
+    supabase,
+    resident.unit_id,
+    dieselParticipates
+  );
   const serviceChargeStatus = await getUnitServiceChargeStatus(
     supabase,
     resident.unit_id
@@ -229,8 +234,22 @@ function DieselStatus({
     owedCycles: number;
     aheadCycles: number;
     amountPerUnit: number;
+    paidCurrentCycle: number;
+    totalPaid: number;
+    dieselNotApplicable?: boolean;
   };
 }) {
+  if (balance.dieselNotApplicable) {
+    return (
+      <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          This unit is <strong>not</strong> on the diesel generator, so there
+          is no diesel contribution obligation here.
+        </p>
+      </div>
+    );
+  }
+
   if (balance.owedCycles > 0) {
     return (
       <div className="rounded-md bg-amber-50 p-4 dark:bg-amber-900/20">
@@ -242,6 +261,10 @@ function DieselStatus({
         </p>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Please pay to: {process.env.NEXT_PUBLIC_BANK_DETAILS ?? "Contact treasurer"}
+        </p>
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          This cycle: {formatCurrency(balance.paidCurrentCycle)} · All cycles:{" "}
+          {formatCurrency(balance.totalPaid)}
         </p>
       </div>
     );
@@ -256,6 +279,10 @@ function DieselStatus({
         <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">
           Credit: {formatCurrency(balance.balance)}
         </p>
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          This cycle: {formatCurrency(balance.paidCurrentCycle)} · All cycles:{" "}
+          {formatCurrency(balance.totalPaid)}
+        </p>
       </div>
     );
   }
@@ -267,6 +294,10 @@ function DieselStatus({
       </p>
       <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">
         Your diesel contributions are up to date.
+      </p>
+      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+        This cycle: {formatCurrency(balance.paidCurrentCycle)} · All cycles:{" "}
+        {formatCurrency(balance.totalPaid)}
       </p>
     </div>
   );

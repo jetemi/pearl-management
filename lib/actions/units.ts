@@ -7,6 +7,7 @@ export async function addUnit(data: {
   owner_name: string;
   phone: string | null;
   email: string | null;
+  diesel_participates?: boolean;
 }) {
   const supabase = await createClient();
 
@@ -17,6 +18,7 @@ export async function addUnit(data: {
       owner_name: data.owner_name.trim(),
       phone: data.phone?.trim() || null,
       email: data.email?.trim() || null,
+      diesel_participates: data.diesel_participates ?? true,
     })
     .select("id")
     .single();

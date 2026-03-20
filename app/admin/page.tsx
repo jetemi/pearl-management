@@ -4,7 +4,10 @@ import { format } from "date-fns";
 import { redirect } from "next/navigation";
 import { getCurrentResident } from "@/lib/auth";
 import { isFacilityManager } from "@/lib/auth-roles";
-import { getUnitDieselBalance } from "@/lib/utils";
+import {
+  getUnitDieselBalance,
+  sumContributionsForCycle,
+} from "@/lib/utils";
 
 export default async function AdminOverviewPage() {
   const resident = await getCurrentResident();
@@ -27,28 +30,27 @@ export default async function AdminOverviewPage() {
 
   const { data: units } = await supabase
     .from("units")
-    .select("id")
+    .select("id, diesel_participates")
     .eq("is_active", true);
+
+  const participating =
+    units?.filter((u) => u.diesel_participates ?? true) ?? [];
+  const participatingIds = participating.map((u) => u.id);
 
   let totalCollectedThisCycle = 0;
   let totalOutstanding = 0;
   let paidCount = 0;
   let unpaidCount = 0;
 
-  if (currentCycle && units) {
-    const amountPerUnit = Number(currentCycle.amount_per_unit);
-    const expectedThisCycle = units.length * amountPerUnit;
-    const { data: cyclePayments } = await supabase
-      .from("diesel_contributions")
-      .select("amount_paid")
-      .eq("cycle_id", currentCycle.id);
-    totalCollectedThisCycle = (cyclePayments ?? []).reduce(
-      (s, p) => s + Number(p.amount_paid),
-      0
+  if (currentCycle && participating.length > 0) {
+    totalCollectedThisCycle = await sumContributionsForCycle(
+      supabase,
+      currentCycle.id,
+      participatingIds
     );
 
-    for (const unit of units) {
-      const balance = await getUnitDieselBalance(supabase, unit.id);
+    for (const unit of participating) {
+      const balance = await getUnitDieselBalance(supabase, unit.id, true);
       totalOutstanding += Math.max(0, balance.totalExpected - balance.totalPaid);
       if (balance.balance >= 0 || balance.totalExpected === 0) {
         paidCount++;
@@ -106,12 +108,18 @@ export default async function AdminOverviewPage() {
         <StatCard
           title="Collected this cycle"
           value={`₦${totalCollectedThisCycle.toLocaleString()}`}
-          sub={currentCycle ? `${paidCount} units paid` : "—"}
+          sub={
+            currentCycle
+              ? `${paidCount} of ${participating.length} on generator paid up`
+              : "—"
+          }
         />
         <StatCard
           title="Outstanding"
           value={`₦${totalOutstanding.toLocaleString()}`}
-          sub={currentCycle ? `${unpaidCount} units owing` : "—"}
+          sub={
+            currentCycle ? `${unpaidCount} on generator owing` : "—"
+          }
         />
       </div>
 

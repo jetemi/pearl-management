@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ReportsView } from "@/components/reports/reports-view";
 import {
+  getDieselPoolTotals,
   getUnitDieselBalance,
   getUnitServiceChargeStatus,
 } from "@/lib/utils";
@@ -11,9 +12,26 @@ export default async function ReportsPage() {
 
   const { data: units } = await supabase
     .from("units")
-    .select("id, flat_number, owner_name")
+    .select("id, flat_number, owner_name, diesel_participates")
     .eq("is_active", true)
     .order("flat_number");
+
+  const { data: openCycle } = await supabase
+    .from("diesel_cycles")
+    .select("id")
+    .is("closed_at", null)
+    .maybeSingle();
+
+  const participatingIds =
+    units
+      ?.filter((u) => u.diesel_participates ?? true)
+      .map((u) => u.id) ?? [];
+
+  const dieselPool = await getDieselPoolTotals(
+    supabase,
+    openCycle?.id ?? null,
+    participatingIds
+  );
 
   const { data: dieselCycles } = await supabase
     .from("diesel_cycles")
@@ -36,15 +54,19 @@ export default async function ReportsPage() {
 
   const dieselReport = await Promise.all(
     (units ?? []).map(async (unit) => {
-      const balance = await getUnitDieselBalance(supabase, unit.id);
+      const onGen = unit.diesel_participates ?? true;
+      const balance = await getUnitDieselBalance(supabase, unit.id, onGen);
       return {
         flat_number: unit.flat_number,
         owner_name: unit.owner_name,
+        dieselOnGenerator: onGen,
+        paidCurrentCycle: balance.paidCurrentCycle,
         totalExpected: balance.totalExpected,
         totalPaid: balance.totalPaid,
         balance: balance.balance,
         owedCycles: balance.owedCycles,
         aheadCycles: balance.aheadCycles,
+        dieselNotApplicable: balance.dieselNotApplicable ?? false,
       };
     })
   );
@@ -98,6 +120,7 @@ export default async function ReportsPage() {
       <ReportsView
         dieselReport={dieselReport}
         dieselCycles={dieselCycles ?? []}
+        dieselPool={dieselPool}
         serviceChargeReport={serviceChargeReport}
         facilityReport={facilityReport}
       />
