@@ -247,29 +247,41 @@ export function generateWhatsAppDieselMessage(
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_ESTATE_NAME
       ? process.env.NEXT_PUBLIC_ESTATE_NAME
       : "Estate";
-  const lines = [
+
+  const outstandingLines: string[] = [
+    `⚠️ *Outstanding (${defaulters.length}):*`,
+    ...defaulters.map(
+      (d) =>
+        `- ${d.flat}: ${d.owedCycles} cycle(s) = ₦${d.owedAmount.toLocaleString()}`
+    ),
+  ];
+
+  if (defaulters.length === 0) {
+    outstandingLines.length = 0;
+    outstandingLines.push("✅ *Outstanding:* none — all units are up to date.");
+  }
+
+  const paidLines: string[] =
+    paidFlats.length > 0
+      ? [`✅ *Paid (${paidFlats.length}):*`, paidFlats.join(", ")]
+      : ["✅ *Paid:* (none yet)"];
+
+  const lines: (string | null)[] = [
     `🏘️ *${estateName} — Diesel Fund Cycle ${cycleNumber}*`,
     flatsOnGenerator != null
       ? `_Flats on generator: ${flatsOnGenerator}_`
       : null,
     "",
-    defaulters.length === 0
-      ? "✅ All units have paid. Thank you!"
-      : `⚠️ *Outstanding (${defaulters.length} units):*`,
-    ...defaulters.map(
-      (d) =>
-        `- ${d.flat}: ${d.owedCycles} cycle(s) = ₦${d.owedAmount.toLocaleString()}`
-    ),
-    defaulters.length > 0 ? "" : null,
-    paidFlats.length > 0 && defaulters.length > 0
-      ? `✅ Paid: ${paidFlats.join(", ")}`
-      : null,
+    ...outstandingLines,
     "",
-    `Please pay to: ${bankDetails}`,
+    `*Please pay to:*`,
+    bankDetails,
+    "",
+    ...paidLines,
     "",
     "Thank you 🙏",
-  ].filter(Boolean);
-  const message = lines.join("\n");
+  ];
+  const message = lines.filter((l): l is string => l !== null).join("\n");
   return `https://wa.me/?text=${encodeURIComponent(message)}`;
 }
 
