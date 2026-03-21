@@ -105,7 +105,7 @@ export async function sendServiceChargeOverdueReminder(
   }
 
   const bankDetails =
-    process.env.NEXT_PUBLIC_BANK_DETAILS ?? "Contact treasurer";
+    process.env.NEXT_PUBLIC_FACILITY_BANK_DETAILS ?? "Contact treasurer";
 
   const html = `
 <!DOCTYPE html>

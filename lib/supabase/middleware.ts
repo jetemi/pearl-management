@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { safeNextPath } from "@/lib/safe-next";
 
-const protectedPaths = ["/admin", "/my"];
+const protectedPaths = ["/admin", "/my", "/household"];
 
 function isProtectedPath(pathname: string): boolean {
   return (
