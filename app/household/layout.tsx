@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentResident } from "@/lib/auth";
+import { isCommittee } from "@/lib/auth-roles";
 
 export default async function HouseholdLayout({
   children,
@@ -18,6 +19,7 @@ export default async function HouseholdLayout({
   }
 
   const flatNumber = resident.units?.flat_number ?? "Unit";
+  const showAdminLink = isCommittee(resident.role);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -33,6 +35,14 @@ export default async function HouseholdLayout({
             >
               My Page
             </Link>
+            {showAdminLink && (
+              <Link
+                href="/admin"
+                className="text-sm font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+              >
+                Admin
+              </Link>
+            )}
             <form action="/auth/signout" method="post">
               <button
                 type="submit"

@@ -7,6 +7,7 @@ import { isCommittee } from "@/lib/auth-roles";
 
 const committeeNavLinks = [
   { href: "/my", label: "My page" },
+  { href: "/household", label: "Household" },
   { href: "/admin", label: "Overview" },
   { href: "/admin/requests", label: "Requests" },
   { href: "/admin/units", label: "Units" },
