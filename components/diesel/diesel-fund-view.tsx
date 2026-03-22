@@ -377,7 +377,7 @@ function WhatsAppReminderButton({
       rel="noopener noreferrer"
       className="inline-flex items-center gap-2 rounded-md border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
     >
-      <span aria-hidden>📱</span>
+      <span aria-hidden>{String.fromCodePoint(0x1f4f1)}</span>
       Generate WhatsApp reminder
     </a>
   );

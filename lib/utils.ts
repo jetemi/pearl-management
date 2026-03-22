@@ -373,6 +373,22 @@ export interface WhatsAppUnitSummary {
   excessAmount: number;
 }
 
+/**
+ * WhatsApp message emojis built at runtime via code points.
+ * Some builds corrupt `\u{...}` escapes in the bundle (they become U+FFFD in URLs).
+ */
+const WA = {
+  estate: String.fromCodePoint(0x1f3d8, 0xfe0f),
+  warn: String.fromCodePoint(0x26a0, 0xfe0f),
+  check: String.fromCodePoint(0x2705),
+  pray: String.fromCodePoint(0x1f64f),
+} as const;
+
+/** Official share URL; same `text` param as wa.me (avoids redirect quirks in some clients). */
+function buildWhatsAppShareUrl(message: string): string {
+  return `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+}
+
 export function generateWhatsAppDieselMessage(
   cycleNumber: number,
   units: WhatsAppUnitSummary[],
@@ -389,7 +405,7 @@ export function generateWhatsAppDieselMessage(
 
   const outstandingLines: string[] = [];
   if (owing.length > 0) {
-    outstandingLines.push(`⚠️ *Outstanding (${owing.length}):*`);
+    outstandingLines.push(`${WA.warn} *Outstanding (${owing.length}):*`);
     for (const u of owing) {
       const total = u.owedCycles.reduce((s, c) => s + c.amount, 0);
       const detail = u.owedCycles
@@ -400,12 +416,14 @@ export function generateWhatsAppDieselMessage(
       );
     }
   } else {
-    outstandingLines.push("✅ *Outstanding:* none — all units are up to date.");
+    outstandingLines.push(
+      `${WA.check} *Outstanding:* none — all units are up to date.`
+    );
   }
 
   const paidLines: string[] = [];
   if (paid.length > 0) {
-    paidLines.push(`✅ *Paid (${paid.length}):*`);
+    paidLines.push(`${WA.check} *Paid (${paid.length}):*`);
     const aheadUnits = paid.filter((u) => u.excessAmount > 0);
     const exactUnits = paid.filter((u) => u.excessAmount === 0);
     if (exactUnits.length > 0) {
@@ -419,11 +437,11 @@ export function generateWhatsAppDieselMessage(
       }
     }
   } else {
-    paidLines.push("✅ *Paid:* (none yet)");
+    paidLines.push(`${WA.check} *Paid:* (none yet)`);
   }
 
   const lines: (string | null)[] = [
-    `🏘️ *${estateName} — Diesel Fund Cycle ${cycleNumber}*`,
+    `${WA.estate} *${estateName} — Diesel Fund Cycle ${cycleNumber}*`,
     flatsOnGenerator != null
       ? `_Flats on generator: ${flatsOnGenerator}_`
       : null,
@@ -435,10 +453,10 @@ export function generateWhatsAppDieselMessage(
     "",
     ...paidLines,
     "",
-    "Thank you 🙏",
+    `Thank you ${WA.pray}`,
   ];
   const message = lines.filter((l): l is string => l !== null).join("\n");
-  return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppShareUrl(message);
 }
 
 /** Plain-text body for WhatsApp (same for every FM). */
@@ -453,9 +471,9 @@ export function buildFacilityRequestWhatsAppMessageText(
       : "Estate";
   const maxBody = 1200;
   const bodyTrim =
-    body.length > maxBody ? `${body.slice(0, maxBody)}…` : body;
+    body.length > maxBody ? `${body.slice(0, maxBody)}...` : body;
   const lines = [
-    `🏘️ *${estateName} — Resident request*`,
+    `${WA.estate} *${estateName} — Resident request*`,
     "",
     `*${title}*`,
     "",
@@ -475,9 +493,11 @@ export function buildFacilityRequestWhatsAppUrl(
   phoneDigits: string | null | undefined
 ): string {
   const digits = (phoneDigits ?? "").replace(/\D/g, "");
-  const base =
-    digits.length >= 8 ? `https://wa.me/${digits}` : "https://wa.me/";
-  return `${base}?text=${encodeURIComponent(messageText)}`;
+  const q = encodeURIComponent(messageText);
+  if (digits.length >= 8) {
+    return `https://wa.me/${digits}?text=${q}`;
+  }
+  return buildWhatsAppShareUrl(messageText);
 }
 
 export function exportToCSV<T extends Record<string, unknown>>(
