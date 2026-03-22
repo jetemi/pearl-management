@@ -55,19 +55,43 @@ export function ServiceChargeView({
   const defaultersWithEmail = defaultersForPeriod
     .map(({ unit }) => {
       const u = unitsWithEmail.find((x) => x.id === unit.id);
-      return u ? { ...unit, email: u.email } : null;
+      const s = getUnitStatusForPeriod(unit.id);
+      return u
+        ? {
+            flat_number: unit.flat_number,
+            owner_name: unit.owner_name,
+            email: u.email,
+            amountOwed:
+              s?.amountOwed ?? Number(selectedPeriod?.amount_per_unit ?? 0),
+          }
+        : null;
     })
-    .filter((u): u is { id: string; flat_number: string; owner_name: string; email: string | null } => !!u);
+    .filter(
+      (
+        row
+      ): row is {
+        flat_number: string;
+        owner_name: string;
+        email: string | null;
+        amountOwed: number;
+      } => !!row
+    );
 
   const handleExportDefaulters = () => {
     if (!selectedPeriod) return;
-    const rows = defaultersForPeriod.map(({ unit }) => ({
-      flat_number: unit.flat_number,
-      owner_name: unit.owner_name,
-      amount: selectedPeriod.amount_per_unit,
-      status: "Outstanding",
-    }));
+    const rows = defaultersForPeriod.map(({ unit }) => {
+      const s = getUnitStatusForPeriod(unit.id);
+      const isPartial = s && !s.paid && s.amountPaid > 0;
+      return {
+        period: selectedPeriod.period_label,
+        flat_number: unit.flat_number,
+        owner_name: unit.owner_name,
+        amount: s?.amountOwed ?? Number(selectedPeriod.amount_per_unit),
+        status: isPartial ? "Partial" : "Outstanding",
+      };
+    });
     const csv = exportToCSV(rows, [
+      { key: "period", header: "Period" },
       { key: "flat_number", header: "Flat" },
       { key: "owner_name", header: "Owner" },
       { key: "amount", header: "Amount (₦)" },
@@ -108,7 +132,6 @@ export function ServiceChargeView({
             </button>
             <EmailDefaultersButton
               periodLabel={selectedPeriod.period_label}
-              amountPerUnit={Number(selectedPeriod.amount_per_unit)}
               defaulters={defaultersWithEmail}
             />
           </>
@@ -182,6 +205,8 @@ export function ServiceChargeView({
                   <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
                     {unitStatuses.map(({ unit }) => {
                       const s = getUnitStatusForPeriod(unit.id);
+                      const partial =
+                        s && !s.paid && s.amountPaid > 0;
                       return (
                         <tr key={unit.id}>
                           <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -195,6 +220,10 @@ export function ServiceChargeView({
                               <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
                                 Paid
                               </span>
+                            ) : partial ? (
+                              <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/30 dark:text-orange-200">
+                                Partial
+                              </span>
                             ) : (
                               <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
                                 Outstanding
@@ -202,11 +231,34 @@ export function ServiceChargeView({
                             )}
                           </td>
                           <td className="px-4 py-3 text-right text-sm">
-                            {s?.paid
-                              ? formatCurrency(s.amountPaid)
-                              : formatCurrency(
-                                  selectedPeriod.amount_per_unit
-                                )}
+                            {s?.paid ? (
+                              formatCurrency(s.amountPerUnit)
+                            ) : partial ? (
+                              <span>
+                                <span className="text-zinc-900 dark:text-zinc-100">
+                                  {formatCurrency(s.amountPaid)}
+                                </span>
+                                <span className="text-zinc-500"> / </span>
+                                <span className="text-zinc-600 dark:text-zinc-400">
+                                  {formatCurrency(s.amountPerUnit)}
+                                </span>
+                                <span className="mt-0.5 block text-xs text-amber-700 dark:text-amber-300">
+                                  Owes {formatCurrency(s.amountOwed)}
+                                </span>
+                              </span>
+                            ) : (
+                              <span>
+                                <span className="font-medium text-amber-800 dark:text-amber-200">
+                                  {formatCurrency(s?.amountOwed ?? 0)}
+                                </span>
+                                <span className="text-zinc-500"> / </span>
+                                <span className="text-zinc-500">
+                                  {formatCurrency(
+                                    Number(selectedPeriod.amount_per_unit)
+                                  )}
+                                </span>
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -248,12 +300,15 @@ export function ServiceChargeView({
 
 function EmailDefaultersButton({
   periodLabel,
-  amountPerUnit,
   defaulters,
 }: {
   periodLabel: string;
-  amountPerUnit: number;
-  defaulters: { flat_number: string; owner_name: string; email: string | null }[];
+  defaulters: {
+    flat_number: string;
+    owner_name: string;
+    email: string | null;
+    amountOwed: number;
+  }[];
 }) {
   const [loading, setLoading] = useState(false);
   const withEmail = defaulters.filter((d) => d.email?.includes("@"));
@@ -267,15 +322,16 @@ function EmailDefaultersButton({
     try {
       const result = await sendServiceChargeOverdueReminder(
         periodLabel,
-        amountPerUnit,
         withEmail.map((d) => ({
           flat_number: d.flat_number,
           owner_name: d.owner_name,
           email: d.email!,
+          amountOwed: d.amountOwed,
         }))
       );
       if (result.success) {
-        toast.success(`Reminder sent to ${withEmail.length} resident(s)`);
+        const n = "sent" in result && typeof result.sent === "number" ? result.sent : withEmail.length;
+        toast.success(`Reminder sent to ${n} resident(s)`);
       } else {
         toast.error(
           typeof result.error === "string"

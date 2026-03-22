@@ -187,6 +187,8 @@ function ServiceChargeStatus({
     periodLabel: string;
     paid: boolean;
     amountPerUnit: number;
+    amountOwed: number;
+    amountPaid: number;
     dueDate: string | null;
   }[];
 }) {
@@ -202,14 +204,25 @@ function ServiceChargeStatus({
   }
 
   if (outstanding.length > 0) {
+    const totalOwed = outstanding.reduce((s, x) => s + x.amountOwed, 0);
     return (
       <div className="rounded-md bg-amber-50 p-4 dark:bg-amber-900/20">
         <p className="font-medium text-amber-800 dark:text-amber-200">
           Outstanding: {outstanding.map((s) => s.periodLabel).join(", ")}
         </p>
         <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
-          Total: {formatCurrency(outstanding.reduce((s, x) => s + x.amountPerUnit, 0))}
+          Total still owed: {formatCurrency(totalOwed)}
         </p>
+        <ul className="mt-2 list-inside list-disc text-xs text-amber-800/90 dark:text-amber-200/90">
+          {outstanding.map((s) => (
+            <li key={s.periodLabel}>
+              {s.periodLabel}: {formatCurrency(s.amountOwed)}
+              {s.amountPaid > 0 && s.amountOwed > 0
+                ? ` (${formatCurrency(s.amountPaid)} covered, ${formatCurrency(s.amountOwed)} remaining)`
+                : null}
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }

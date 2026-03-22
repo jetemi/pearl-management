@@ -82,6 +82,8 @@ export default async function ReportsPage() {
             owner_name: unit.owner_name,
             paid: s?.paid ?? false,
             amountPaid: s?.amountPaid ?? 0,
+            amountOwed: s?.amountOwed ?? Number(period.amount_per_unit),
+            amountPerUnit: s?.amountPerUnit ?? Number(period.amount_per_unit),
           };
         })
       );

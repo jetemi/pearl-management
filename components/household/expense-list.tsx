@@ -13,15 +13,19 @@ export interface ExpenseItem {
   amount: number;
   expenseDate: string;
   createdAt: string;
+  cycleId?: string | null;
+  budgetLabel?: string;
 }
 
 export function ExpenseList({
   expenses,
-  totalSpent,
+  totalSpentActiveBudget,
+  totalExpensesAllTime,
   activeCycleId,
 }: {
   expenses: ExpenseItem[];
-  totalSpent: number;
+  totalSpentActiveBudget: number;
+  totalExpensesAllTime: number;
   activeCycleId: string | null;
 }) {
   const router = useRouter();
@@ -39,16 +43,24 @@ export function ExpenseList({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Total spent:{" "}
-          <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-            {formatCurrency(totalSpent)}
-          </span>
-        </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p>
+            Spent (active budget):{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {formatCurrency(totalSpentActiveBudget)}
+            </span>
+          </p>
+          <p className="mt-0.5">
+            Total expenses (all-time):{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {formatCurrency(totalExpensesAllTime)}
+            </span>
+          </p>
+        </div>
         <button
           onClick={() => setShowModal(true)}
-          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+          className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Add expense
         </button>
@@ -57,8 +69,8 @@ export function ExpenseList({
       {expenses.length === 0 ? (
         <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
           {activeCycleId
-            ? "No expenses recorded for this cycle."
-            : "Start a budget cycle to begin tracking expenses."}
+            ? "No expenses recorded yet."
+            : "Add a budget to track new expenses against it. Past expenses still appear here once recorded."}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -67,6 +79,9 @@ export function ExpenseList({
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
                   Date
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                  Budget
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
                   Description
@@ -84,6 +99,9 @@ export function ExpenseList({
                 <tr key={e.id} className="group">
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
                     {format(new Date(e.expenseDate), "MMM d, yyyy")}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                    {e.budgetLabel ?? (e.cycleId ? "—" : "No budget")}
                   </td>
                   <td className="px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100">
                     {e.description}
@@ -170,8 +188,7 @@ function AddExpenseModal({
         <h3 className="mb-4 text-lg font-semibold">Add expense</h3>
         {!cycleId && (
           <p className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-            No active cycle. Start a budget cycle first to track expenses
-            against a budget.
+            No active budget. Add a budget first to attach new expenses to it.
           </p>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">

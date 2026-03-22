@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { addTask, toggleTask, deleteTask } from "@/lib/actions/household";
+import { addTask, toggleTask, deleteTask, updateTask } from "@/lib/actions/household";
 
 export interface TaskItem {
   id: string;
@@ -194,6 +194,99 @@ function TaskRow({
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editNote, setEditNote] = useState(task.note ?? "");
+  const [editCategory, setEditCategory] = useState(task.category);
+  const [saving, setSaving] = useState(false);
+
+  function openEdit() {
+    setEditTitle(task.title);
+    setEditNote(task.note ?? "");
+    setEditCategory(task.category);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditTitle(task.title);
+    setEditNote(task.note ?? "");
+    setEditCategory(task.category);
+  }
+
+  async function saveEdit() {
+    setSaving(true);
+    const result = await updateTask(
+      task.id,
+      editTitle,
+      editCategory,
+      editNote
+    );
+    if (result.success) {
+      toast.success("Saved");
+      setEditing(false);
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+    setSaving(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="flex-1 space-y-2">
+            <input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+              placeholder="Title"
+            />
+            <input
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+              placeholder="Note (optional)"
+            />
+            <select
+              value={editCategory}
+              onChange={(e) =>
+                setEditCategory(e.target.value as TaskItem["category"])
+              }
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm sm:w-auto dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex shrink-0 gap-2 sm:flex-col">
+            <button
+              type="button"
+              onClick={saveEdit}
+              disabled={saving || !editTitle.trim()}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={saving}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-600"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="group flex items-start gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
       <button
@@ -211,16 +304,18 @@ function TaskRow({
           </svg>
         )}
       </button>
-      <div className="flex-1 min-w-0">
-        <p
-          className={`text-sm ${
+      <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={openEdit}
+          className={`text-left text-sm ${
             task.isCompleted
               ? "text-zinc-400 line-through dark:text-zinc-500"
               : "text-zinc-900 dark:text-zinc-100"
-          }`}
+          } hover:underline`}
         >
           {task.title}
-        </p>
+        </button>
         {task.note && (
           <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
             {task.note}
@@ -228,6 +323,16 @@ function TaskRow({
         )}
       </div>
       <CategoryBadge category={task.category} />
+      <button
+        type="button"
+        onClick={openEdit}
+        className="flex-shrink-0 text-zinc-400 opacity-0 transition-opacity hover:text-emerald-600 group-hover:opacity-100"
+        title="Edit"
+      >
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+        </svg>
+      </button>
       <button
         onClick={() => onDelete(task.id)}
         className="flex-shrink-0 text-zinc-400 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"

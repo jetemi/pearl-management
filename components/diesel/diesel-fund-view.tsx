@@ -9,6 +9,8 @@ import {
   generateWhatsAppDieselMessage,
   type DieselBalance,
   type DieselPoolTotals,
+  type CycleAllocation,
+  type WhatsAppUnitSummary,
 } from "@/lib/utils";
 import { sendNewCycleAnnouncement } from "@/lib/actions/email";
 import { format } from "date-fns";
@@ -54,6 +56,7 @@ export function DieselFundView({
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showNewCycle, setShowNewCycle] = useState(false);
   const [showRecordPurchase, setShowRecordPurchase] = useState(false);
+  const [expandedUnit, setExpandedUnit] = useState<string | null>(null);
 
   if (activeUnitCount === 0) {
     return (
@@ -140,9 +143,9 @@ export function DieselFundView({
           sub={`₦${amountPerUnit.toLocaleString()} per unit · ${unitBalances.length} on generator`}
         />
         <StatCard
-          title="Collected this cycle"
+          title="Covered this cycle"
           value={formatCurrency(poolTotals.collectedThisCycle)}
-          sub={`${paidUpCount} units paid up (cumulative)`}
+          sub={`${paidUpCount} paid up · incl. prior credit`}
         />
         <StatCard
           title="Outstanding (cumulative)"
@@ -172,7 +175,7 @@ export function DieselFundView({
           <StatCard
             title="Net this cycle"
             value={formatCurrency(poolTotals.netThisCycle)}
-            sub="Can be negative if spend &gt; collected"
+            sub="Covered minus purchases this cycle"
           />
           <StatCard
             title="Net fund (all time)"
@@ -203,7 +206,6 @@ export function DieselFundView({
         </button>
         <WhatsAppReminderButton
           cycleNumber={currentCycle.cycle_number}
-          amountPerUnit={amountPerUnit}
           unitBalances={unitBalances}
           participatingCount={unitBalances.length}
         />
@@ -223,7 +225,7 @@ export function DieselFundView({
                 Status
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
-                This cycle
+                Covered this cycle
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
                 Lifetime paid
@@ -234,38 +236,20 @@ export function DieselFundView({
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-            {unitBalances.map(({ unit, balance }) => (
-              <tr key={unit.id}>
-                <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  {unit.flat_number}
-                </td>
-                <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
-                  {unit.owner_name}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge balance={balance} />
-                </td>
-                <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
-                  {formatCurrency(balance.paidCurrentCycle)}
-                </td>
-                <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
-                  {formatCurrency(balance.totalPaid)}
-                </td>
-                <td className="px-4 py-3 text-right text-sm">
-                  {balance.balance < 0 ? (
-                    <span className="text-amber-600 dark:text-amber-400">
-                      -{formatCurrency(Math.abs(balance.balance))}
-                    </span>
-                  ) : balance.balance > 0 ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      +{formatCurrency(balance.balance)}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-500">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {unitBalances.map(({ unit, balance }) => {
+              const isExpanded = expandedUnit === unit.id;
+              return (
+                <UnitRow
+                  key={unit.id}
+                  unit={unit}
+                  balance={balance}
+                  isExpanded={isExpanded}
+                  onToggle={() =>
+                    setExpandedUnit(isExpanded ? null : unit.id)
+                  }
+                />
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -358,34 +342,32 @@ export function DieselFundView({
 
 function WhatsAppReminderButton({
   cycleNumber,
-  amountPerUnit,
   unitBalances,
   participatingCount,
 }: {
   cycleNumber: number;
-  amountPerUnit: number;
   unitBalances: UnitWithBalance[];
   participatingCount: number;
 }) {
-  const defaulters = unitBalances
-    .filter((u) => u.balance.owedCycles > 0)
-    .map((u) => ({
+  const units: WhatsAppUnitSummary[] = unitBalances.map((u) => {
+    const owedCycles = u.balance.perCycleBreakdown
+      .filter((c) => c.shortfall > 0)
+      .map((c) => ({ cycleNumber: c.cycleNumber, amount: c.shortfall }));
+    return {
       flat: u.unit.flat_number,
-      owedCycles: u.balance.owedCycles,
-      owedAmount: u.balance.owedCycles * amountPerUnit,
-    }));
-  const paidFlats = unitBalances
-    .filter((u) => u.balance.owedCycles === 0)
-    .map((u) => u.unit.flat_number);
+      owedCycles,
+      paidThisCycle: u.balance.paidCurrentCycle >= u.balance.amountPerUnit,
+      excessAmount: Math.max(0, u.balance.balance),
+    };
+  });
   const bankDetails =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_BANK_DETAILS
       ? process.env.NEXT_PUBLIC_BANK_DETAILS
       : "Contact treasurer";
   const url = generateWhatsAppDieselMessage(
     cycleNumber,
-    defaulters,
+    units,
     bankDetails,
-    paidFlats,
     participatingCount
   );
   return (
@@ -451,6 +433,131 @@ function StatusBadge({ balance }: { balance: DieselBalance }) {
     <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
       Paid up
     </span>
+  );
+}
+
+function UnitRow({
+  unit,
+  balance,
+  isExpanded,
+  onToggle,
+}: {
+  unit: { id: string; flat_number: string; owner_name: string };
+  balance: DieselBalance;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const hasBreakdown = balance.perCycleBreakdown.length > 0;
+  return (
+    <>
+      <tr
+        className={hasBreakdown ? "cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900/50" : ""}
+        onClick={hasBreakdown ? onToggle : undefined}
+      >
+        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          <span className="flex items-center gap-1.5">
+            {hasBreakdown && (
+              <svg
+                className={`h-3.5 w-3.5 flex-shrink-0 text-zinc-400 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            )}
+            {unit.flat_number}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+          {unit.owner_name}
+        </td>
+        <td className="px-4 py-3">
+          <StatusBadge balance={balance} />
+        </td>
+        <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
+          {formatCurrency(balance.paidCurrentCycle)}
+        </td>
+        <td className="px-4 py-3 text-right text-sm text-zinc-700 dark:text-zinc-300">
+          {formatCurrency(balance.totalPaid)}
+        </td>
+        <td className="px-4 py-3 text-right text-sm">
+          {balance.balance < 0 ? (
+            <span className="text-amber-600 dark:text-amber-400">
+              -{formatCurrency(Math.abs(balance.balance))}
+            </span>
+          ) : balance.balance > 0 ? (
+            <span className="text-emerald-600 dark:text-emerald-400">
+              +{formatCurrency(balance.balance)}
+            </span>
+          ) : (
+            <span className="text-zinc-500">—</span>
+          )}
+        </td>
+      </tr>
+      {isExpanded && hasBreakdown && (
+        <tr>
+          <td colSpan={6} className="bg-zinc-50 px-4 py-3 dark:bg-zinc-900/30">
+            <CycleBreakdown breakdown={balance.perCycleBreakdown} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function CycleBreakdown({ breakdown }: { breakdown: CycleAllocation[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-xs">
+        <thead>
+          <tr className="text-zinc-500 dark:text-zinc-400">
+            <th className="pb-1 pr-4 text-left font-medium">Cycle</th>
+            <th className="pb-1 pr-4 text-right font-medium">Expected</th>
+            <th className="pb-1 pr-4 text-right font-medium">Covered</th>
+            <th className="pb-1 text-left font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {breakdown.map((entry) => {
+            let status: string;
+            let statusClass: string;
+            if (entry.shortfall === 0) {
+              status = "Paid";
+              statusClass = "text-emerald-600 dark:text-emerald-400";
+            } else if (entry.allocated > 0) {
+              status = `Partial (owes ${formatCurrency(entry.shortfall)})`;
+              statusClass = "text-amber-600 dark:text-amber-400";
+            } else {
+              status = "Unpaid";
+              statusClass = "text-red-600 dark:text-red-400";
+            }
+            return (
+              <tr key={entry.cycleId}>
+                <td className="py-1 pr-4 text-zinc-700 dark:text-zinc-300">
+                  #{entry.cycleNumber}
+                  {entry.isOpen && (
+                    <span className="ml-1 text-[10px] font-medium uppercase text-blue-600 dark:text-blue-400">
+                      current
+                    </span>
+                  )}
+                </td>
+                <td className="py-1 pr-4 text-right text-zinc-700 dark:text-zinc-300">
+                  {formatCurrency(entry.expected)}
+                </td>
+                <td className="py-1 pr-4 text-right text-zinc-700 dark:text-zinc-300">
+                  {formatCurrency(entry.allocated)}
+                </td>
+                <td className={`py-1 font-medium ${statusClass}`}>
+                  {status}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

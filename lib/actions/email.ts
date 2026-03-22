@@ -95,8 +95,13 @@ export async function sendNewCycleAnnouncement(
 
 export async function sendServiceChargeOverdueReminder(
   periodLabel: string,
-  amountPerUnit: number,
-  defaulters: { flat_number: string; owner_name: string; email: string }[]
+  defaulters: {
+    flat_number: string;
+    owner_name: string;
+    email: string;
+    /** Remaining balance for this period (after oldest-period-first allocation). */
+    amountOwed: number;
+  }[]
 ) {
   const recipients = defaulters.filter((d) => d.email?.includes("@"));
 
@@ -107,24 +112,37 @@ export async function sendServiceChargeOverdueReminder(
   const bankDetails =
     process.env.NEXT_PUBLIC_FACILITY_BANK_DETAILS ?? "Contact treasurer";
 
-  const html = `
+  let lastError: unknown;
+  let sent = 0;
+  for (const d of recipients) {
+    const html = `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
   <h2 style="color: #1a1a1a;">${ESTATE_NAME} — Service Charge Reminder</h2>
   <p>This is a reminder that your service charge payment for <strong>${escapeHtml(periodLabel)}</strong> is outstanding.</p>
-  <p><strong>Amount due:</strong> ₦${amountPerUnit.toLocaleString()}</p>
+  <p><strong>Amount still due:</strong> ₦${d.amountOwed.toLocaleString()}</p>
   <p><strong>Please pay to:</strong> ${escapeHtml(bankDetails)}</p>
   <p style="margin-top: 24px; color: #666; font-size: 14px;">— ${ESTATE_NAME} Management</p>
 </body>
 </html>`;
+    const result = await sendEmail({
+      to: d.email,
+      subject: `[${ESTATE_NAME}] Service Charge Reminder: ${periodLabel}`,
+      html,
+    });
+    if (result.success) sent++;
+    else lastError = result.error;
+  }
 
-  return sendBulkEmails(
-    recipients.map((r) => ({ email: r.email })),
-    `[${ESTATE_NAME}] Service Charge Reminder: ${periodLabel}`,
-    html
-  );
+  if (sent === 0) {
+    return {
+      success: false,
+      error: lastError ?? "Failed to send emails",
+    };
+  }
+  return { success: true, sent };
 }
 
 export async function notifyFacilityManagersOfRequest(

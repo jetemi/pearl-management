@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { TaskList, type TaskItem } from "./task-list";
 import { ExpenseList, type ExpenseItem } from "./expense-list";
-import { CycleSummary, type CycleData } from "./cycle-summary";
+import { CycleSummary, type CycleData, type PastCycleData } from "./cycle-summary";
 
 type Tab = "tasks" | "expenses" | "budget";
 
@@ -19,12 +19,16 @@ export function HouseholdView({
   tasks,
   expenses,
   totalSpent,
+  totalExpensesAllTime,
+  totalIncomeAllTime,
 }: {
   activeCycle: CycleData | null;
-  pastCycles: (CycleData & { endedAt: string | null })[];
+  pastCycles: PastCycleData[];
   tasks: TaskItem[];
   expenses: ExpenseItem[];
   totalSpent: number;
+  totalExpensesAllTime: number;
+  totalIncomeAllTime: number;
 }) {
   const [tab, setTab] = useState<Tab>("tasks");
 
@@ -36,7 +40,7 @@ export function HouseholdView({
         </h1>
         {activeCycle && (
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            {activeCycle.name ?? "Active cycle"}
+            {activeCycle.name ?? "Active budget"}
           </span>
         )}
       </div>
@@ -66,7 +70,8 @@ export function HouseholdView({
       {tab === "expenses" && (
         <ExpenseList
           expenses={expenses}
-          totalSpent={totalSpent}
+          totalSpentActiveBudget={totalSpent}
+          totalExpensesAllTime={totalExpensesAllTime}
           activeCycleId={activeCycle?.id ?? null}
         />
       )}
@@ -75,6 +80,8 @@ export function HouseholdView({
           activeCycle={activeCycle}
           pastCycles={pastCycles}
           totalSpent={totalSpent}
+          totalExpensesAllTime={totalExpensesAllTime}
+          totalIncomeAllTime={totalIncomeAllTime}
         />
       )}
     </div>

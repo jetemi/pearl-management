@@ -14,6 +14,8 @@ export default async function HouseholdPage() {
     { data: activeCycle },
     { data: pastCycles },
     { data: tasks },
+    { data: allExpensesRows },
+    { data: allCyclesForUnit },
   ] = await Promise.all([
     supabase
       .from("household_cycles")
@@ -32,31 +34,53 @@ export default async function HouseholdPage() {
       .select("*")
       .eq("unit_id", unitId)
       .order("created_at", { ascending: false }),
-  ]);
-
-  let expenses: typeof cycleExpenses = [];
-  let totalSpent = 0;
-  type CycleExpense = {
-    id: string;
-    description: string;
-    amount: number;
-    expense_date: string;
-    created_by: string;
-    created_at: string;
-    cycle_id: string | null;
-  };
-  let cycleExpenses: CycleExpense[] = [];
-
-  if (activeCycle) {
-    const { data } = await supabase
+    supabase
       .from("household_expenses")
       .select("*")
-      .eq("cycle_id", activeCycle.id)
-      .order("expense_date", { ascending: false });
-    cycleExpenses = (data ?? []) as CycleExpense[];
-    expenses = cycleExpenses;
-    totalSpent = cycleExpenses.reduce((s, e) => s + Number(e.amount), 0);
+      .eq("unit_id", unitId)
+      .order("expense_date", { ascending: false }),
+    supabase
+      .from("household_cycles")
+      .select("id, name, budget_amount")
+      .eq("unit_id", unitId),
+  ]);
+
+  const cycleNameById = new Map(
+    (allCyclesForUnit ?? []).map((c) => [c.id, c.name ?? "Unnamed budget"])
+  );
+
+  const totalExpensesAllTime = (allExpensesRows ?? []).reduce(
+    (s, e) => s + Number(e.amount),
+    0
+  );
+  const totalIncomeAllTime = (allCyclesForUnit ?? []).reduce(
+    (s, c) => s + Number(c.budget_amount),
+    0
+  );
+
+  const spentByCycleId = new Map<string, number>();
+  for (const e of allExpensesRows ?? []) {
+    if (!e.cycle_id) continue;
+    spentByCycleId.set(
+      e.cycle_id,
+      (spentByCycleId.get(e.cycle_id) ?? 0) + Number(e.amount)
+    );
   }
+
+  let totalSpentActiveBudget = 0;
+  if (activeCycle) {
+    totalSpentActiveBudget = spentByCycleId.get(activeCycle.id) ?? 0;
+  }
+
+  const pastCyclesWithSpent = (pastCycles ?? []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    budgetAmount: Number(c.budget_amount),
+    carryForward: Number(c.carry_forward),
+    startedAt: c.started_at,
+    endedAt: c.ended_at,
+    spent: spentByCycleId.get(c.id) ?? 0,
+  }));
 
   return (
     <HouseholdView
@@ -71,14 +95,7 @@ export default async function HouseholdPage() {
             }
           : null
       }
-      pastCycles={(pastCycles ?? []).map((c) => ({
-        id: c.id,
-        name: c.name,
-        budgetAmount: Number(c.budget_amount),
-        carryForward: Number(c.carry_forward),
-        startedAt: c.started_at,
-        endedAt: c.ended_at,
-      }))}
+      pastCycles={pastCyclesWithSpent}
       tasks={(tasks ?? []).map((t) => ({
         id: t.id,
         title: t.title,
@@ -87,14 +104,20 @@ export default async function HouseholdPage() {
         isCompleted: t.is_completed,
         createdAt: t.created_at,
       }))}
-      expenses={expenses.map((e) => ({
+      expenses={(allExpensesRows ?? []).map((e) => ({
         id: e.id,
         description: e.description,
         amount: Number(e.amount),
         expenseDate: e.expense_date,
         createdAt: e.created_at,
+        cycleId: e.cycle_id,
+        budgetLabel: e.cycle_id
+          ? (cycleNameById.get(e.cycle_id) ?? "Budget")
+          : "No budget",
       }))}
-      totalSpent={totalSpent}
+      totalSpent={totalSpentActiveBudget}
+      totalExpensesAllTime={totalExpensesAllTime}
+      totalIncomeAllTime={totalIncomeAllTime}
     />
   );
 }

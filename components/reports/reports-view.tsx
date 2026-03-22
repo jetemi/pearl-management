@@ -22,6 +22,8 @@ interface ServiceChargePeriodReport {
     owner_name: string;
     paid: boolean;
     amountPaid: number;
+    amountOwed: number;
+    amountPerUnit: number;
   }[];
 }
 
@@ -100,17 +102,24 @@ export function ReportsView({
   };
 
   const handleExportServiceCharge = (periodLabel: string, unitStatuses: ServiceChargePeriodReport["unitStatuses"]) => {
-    const rows = unitStatuses.map((u) => ({
-      flat: u.flat_number,
-      owner: u.owner_name,
-      status: u.paid ? "Paid" : "Outstanding",
-      amountPaid: u.amountPaid,
-    }));
+    const rows = unitStatuses.map((u) => {
+      const partial = !u.paid && u.amountPaid > 0;
+      return {
+        flat: u.flat_number,
+        owner: u.owner_name,
+        status: u.paid ? "Paid" : partial ? "Partial" : "Outstanding",
+        amountCovered: u.amountPaid,
+        amountOwed: u.paid ? 0 : u.amountOwed,
+        amountExpected: u.amountPerUnit,
+      };
+    });
     const csv = exportToCSV(rows, [
       { key: "flat", header: "Flat" },
       { key: "owner", header: "Owner" },
       { key: "status", header: "Status" },
-      { key: "amountPaid", header: "Amount Paid (₦)" },
+      { key: "amountCovered", header: "Covered (₦)" },
+      { key: "amountOwed", header: "Still owed (₦)" },
+      { key: "amountExpected", header: "Period target (₦)" },
     ]);
     downloadCSV(csv, `service-charge-${periodLabel.replace(/\s+/g, "-")}.csv`);
   };
@@ -279,22 +288,39 @@ export function ReportsView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-                  {unitStatuses.map((u) => (
-                    <tr key={u.flat_number}>
-                      <td className="px-4 py-2 text-sm">{u.flat_number}</td>
-                      <td className="px-4 py-2 text-sm">{u.owner_name}</td>
-                      <td className="px-4 py-2 text-sm">
-                        {u.paid ? (
-                          <span className="text-emerald-600">Paid</span>
-                        ) : (
-                          <span className="text-amber-600">Outstanding</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-right text-sm">
-                        {formatCurrency(u.amountPaid)}
-                      </td>
-                    </tr>
-                  ))}
+                  {unitStatuses.map((u) => {
+                    const partial = !u.paid && u.amountPaid > 0;
+                    return (
+                      <tr key={u.flat_number}>
+                        <td className="px-4 py-2 text-sm">{u.flat_number}</td>
+                        <td className="px-4 py-2 text-sm">{u.owner_name}</td>
+                        <td className="px-4 py-2 text-sm">
+                          {u.paid ? (
+                            <span className="text-emerald-600">Paid</span>
+                          ) : partial ? (
+                            <span className="text-orange-600">Partial</span>
+                          ) : (
+                            <span className="text-amber-600">Outstanding</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm">
+                          {u.paid ? (
+                            formatCurrency(u.amountPerUnit)
+                          ) : (
+                            <span>
+                              {formatCurrency(u.amountPaid)} /{" "}
+                              {formatCurrency(u.amountPerUnit)}
+                              {partial && (
+                                <span className="ml-1 text-xs text-zinc-500">
+                                  (owes {formatCurrency(u.amountOwed)})
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

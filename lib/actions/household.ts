@@ -73,6 +73,33 @@ export async function toggleTask(taskId: string): Promise<Result> {
   return { success: true };
 }
 
+export async function updateTask(
+  taskId: string,
+  title: string,
+  category: string,
+  note?: string
+): Promise<Result> {
+  const { resident, error: authErr } = await getResidentWithUnit();
+  if (!resident) return { success: false, error: authErr };
+
+  const t = title.trim();
+  if (!t) return { success: false, error: "Title is required" };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("household_tasks")
+    .update({
+      title: t,
+      note: note?.trim() || null,
+      category,
+    })
+    .eq("id", taskId)
+    .eq("unit_id", resident.unit_id);
+
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
 export async function deleteTask(taskId: string): Promise<Result> {
   const { resident, error: authErr } = await getResidentWithUnit();
   if (!resident) return { success: false, error: authErr };
