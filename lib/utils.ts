@@ -112,6 +112,24 @@ export interface DieselPoolTotals {
   netLifetime: number;
 }
 
+type DieselCycleRow = {
+  id: string;
+  cycle_number: number;
+  amount_per_unit: number;
+  closed_at: string | null;
+};
+
+/** Cycles this unit is liable for (NULL min = all cycles, legacy). */
+export function filterDieselCyclesForUnit(
+  allCycles: DieselCycleRow[],
+  dieselObligationFromCycleNumber: number | null | undefined
+): DieselCycleRow[] {
+  if (dieselObligationFromCycleNumber == null) return allCycles;
+  return allCycles.filter(
+    (c) => c.cycle_number >= dieselObligationFromCycleNumber
+  );
+}
+
 export async function getDieselPoolTotals(
   supabase: SupabaseClient,
   openCycleId: string | null,
@@ -136,6 +154,19 @@ export async function getDieselPoolTotals(
       .order("cycle_number", { ascending: true });
 
     if (allCycles && participatingUnitIds.length > 0) {
+      const { data: unitRows } = await supabase
+        .from("units")
+        .select("id, diesel_obligation_from_cycle_number")
+        .in("id", participatingUnitIds);
+
+      const minCycleByUnit = new Map<string, number | null>();
+      for (const u of unitRows ?? []) {
+        minCycleByUnit.set(
+          u.id,
+          u.diesel_obligation_from_cycle_number ?? null
+        );
+      }
+
       const { data: allContribs } = await supabase
         .from("diesel_contributions")
         .select("unit_id, amount_paid")
@@ -151,7 +182,9 @@ export async function getDieselPoolTotals(
 
       for (const unitId of participatingUnitIds) {
         const unitTotal = contribsByUnit.get(unitId) ?? 0;
-        const breakdown = allocatePaymentsToCycles(allCycles, unitTotal);
+        const minN = minCycleByUnit.get(unitId) ?? null;
+        const applicable = filterDieselCyclesForUnit(allCycles, minN);
+        const breakdown = allocatePaymentsToCycles(applicable, unitTotal);
         const openEntry = breakdown.find((e) => e.isOpen);
         collectedThisCycle += openEntry?.allocated ?? 0;
       }
@@ -190,6 +223,12 @@ export async function getUnitDieselBalance(
     };
   }
 
+  const { data: unitRow } = await supabase
+    .from("units")
+    .select("diesel_obligation_from_cycle_number")
+    .eq("id", unitId)
+    .single();
+
   const { data: cycles } = await supabase
     .from("diesel_cycles")
     .select("id, cycle_number, amount_per_unit, closed_at")
@@ -201,7 +240,12 @@ export async function getUnitDieselBalance(
     .eq("unit_id", unitId);
 
   const allCycles = cycles ?? [];
-  const totalExpected = allCycles.reduce(
+  const applicableCycles = filterDieselCyclesForUnit(
+    allCycles,
+    unitRow?.diesel_obligation_from_cycle_number ?? null
+  );
+
+  const totalExpected = applicableCycles.reduce(
     (sum, c) => sum + Number(c.amount_per_unit),
     0
   );
@@ -211,14 +255,17 @@ export async function getUnitDieselBalance(
   );
   const balance = totalPaid - totalExpected;
 
-  const openCycle = allCycles.find((c) => c.closed_at == null);
+  const openCycle = applicableCycles.find((c) => c.closed_at == null);
   const amountPerUnit = openCycle
     ? Number(openCycle.amount_per_unit)
-    : allCycles.length > 0
-      ? Number(allCycles[allCycles.length - 1].amount_per_unit)
+    : applicableCycles.length > 0
+      ? Number(applicableCycles[applicableCycles.length - 1].amount_per_unit)
       : 0;
 
-  const perCycleBreakdown = allocatePaymentsToCycles(allCycles, totalPaid);
+  const perCycleBreakdown = allocatePaymentsToCycles(
+    applicableCycles,
+    totalPaid
+  );
   const openEntry = perCycleBreakdown.find((e) => e.isOpen);
   const paidCurrentCycle = openEntry?.allocated ?? 0;
 
@@ -278,6 +325,8 @@ export interface ServiceChargePeriodStatus {
   periodLabel: string;
   amountPerUnit: number;
   dueDate: string | null;
+  /** False when period is before this unit's service_charge_obligation_start. */
+  obligationApplies: boolean;
   /** True when waterfall-allocated amount fully covers this period. */
   paid: boolean;
   /**
@@ -292,10 +341,31 @@ export interface ServiceChargePeriodStatus {
   paymentDate: string | null;
 }
 
+/** Whether this global period counts toward the unit's obligation (due_date or created_at vs start). */
+export function isServiceChargePeriodApplicable(
+  period: { due_date: string | null; created_at: string },
+  obligationStart: string | null | undefined
+): boolean {
+  if (!obligationStart) return true;
+  if (period.due_date) {
+    return period.due_date >= obligationStart;
+  }
+  const createdDay = period.created_at.slice(0, 10);
+  return createdDay >= obligationStart;
+}
+
 export async function getUnitServiceChargeStatus(
   supabase: SupabaseClient,
   unitId: string
 ): Promise<ServiceChargePeriodStatus[]> {
+  const { data: unitRow } = await supabase
+    .from("units")
+    .select("service_charge_obligation_start")
+    .eq("id", unitId)
+    .single();
+
+  const obligationStart = unitRow?.service_charge_obligation_start ?? null;
+
   const { data: periods } = await supabase
     .from("service_charge_periods")
     .select("id, period_label, amount_per_unit, due_date, created_at")
@@ -329,7 +399,11 @@ export async function getUnitServiceChargeStatus(
     recordedByPeriod.set(pid, { sum, lastDate });
   }
 
-  const orderedForAlloc = periodsList.map((p) => ({
+  const applicablePeriods = periodsList.filter((p) =>
+    isServiceChargePeriodApplicable(p, obligationStart)
+  );
+
+  const orderedForAlloc = applicablePeriods.map((p) => ({
     id: p.id,
     amount_per_unit: Number(p.amount_per_unit),
   }));
@@ -343,11 +417,28 @@ export async function getUnitServiceChargeStatus(
   );
 
   return periodsList.map((period) => {
+    const applies = isServiceChargePeriodApplicable(period, obligationStart);
     const expected = Number(period.amount_per_unit);
-    const alloc = allocById.get(period.id);
-    const allocated = alloc?.allocated ?? 0;
     const rec = recordedByPeriod.get(period.id);
     const amountRecorded = rec?.sum ?? 0;
+
+    if (!applies) {
+      return {
+        periodId: period.id,
+        periodLabel: period.period_label,
+        amountPerUnit: expected,
+        dueDate: period.due_date,
+        obligationApplies: false,
+        paid: true,
+        amountPaid: 0,
+        amountRecorded,
+        amountOwed: 0,
+        paymentDate: rec?.lastDate ?? null,
+      };
+    }
+
+    const alloc = allocById.get(period.id);
+    const allocated = alloc?.allocated ?? 0;
     const EPS = 1e-6;
     const paid = allocated + EPS >= expected;
     const amountOwed = Math.max(0, expected - allocated);
@@ -357,6 +448,7 @@ export async function getUnitServiceChargeStatus(
       periodLabel: period.period_label,
       amountPerUnit: expected,
       dueDate: period.due_date,
+      obligationApplies: true,
       paid,
       amountPaid: allocated,
       amountRecorded,

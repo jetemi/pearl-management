@@ -20,6 +20,7 @@ interface ServiceChargePeriodReport {
   unitStatuses: {
     flat_number: string;
     owner_name: string;
+    obligationApplies: boolean;
     paid: boolean;
     amountPaid: number;
     amountOwed: number;
@@ -103,6 +104,16 @@ export function ReportsView({
 
   const handleExportServiceCharge = (periodLabel: string, unitStatuses: ServiceChargePeriodReport["unitStatuses"]) => {
     const rows = unitStatuses.map((u) => {
+      if (!u.obligationApplies) {
+        return {
+          flat: u.flat_number,
+          owner: u.owner_name,
+          status: "Not liable",
+          amountCovered: "",
+          amountOwed: "",
+          amountExpected: "",
+        };
+      }
       const partial = !u.paid && u.amountPaid > 0;
       return {
         flat: u.flat_number,
@@ -295,7 +306,9 @@ export function ReportsView({
                         <td className="px-4 py-2 text-sm">{u.flat_number}</td>
                         <td className="px-4 py-2 text-sm">{u.owner_name}</td>
                         <td className="px-4 py-2 text-sm">
-                          {u.paid ? (
+                          {!u.obligationApplies ? (
+                            <span className="text-zinc-500">Not liable</span>
+                          ) : u.paid ? (
                             <span className="text-emerald-600">Paid</span>
                           ) : partial ? (
                             <span className="text-orange-600">Partial</span>
@@ -304,7 +317,9 @@ export function ReportsView({
                           )}
                         </td>
                         <td className="px-4 py-2 text-right text-sm">
-                          {u.paid ? (
+                          {!u.obligationApplies ? (
+                            <span className="text-zinc-400">—</span>
+                          ) : u.paid ? (
                             formatCurrency(u.amountPerUnit)
                           ) : (
                             <span>

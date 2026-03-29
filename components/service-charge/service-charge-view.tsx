@@ -49,7 +49,7 @@ export function ServiceChargeView({
 
   const defaultersForPeriod = unitStatuses.filter((us) => {
     const s = us.status.find((sp) => sp.periodId === selectedPeriodId);
-    return s && !s.paid;
+    return s && !s.paid && s.obligationApplies;
   });
 
   const defaultersWithEmail = defaultersForPeriod
@@ -207,6 +207,7 @@ export function ServiceChargeView({
                       const s = getUnitStatusForPeriod(unit.id);
                       const partial =
                         s && !s.paid && s.amountPaid > 0;
+                      const notLiable = s && !s.obligationApplies;
                       return (
                         <tr key={unit.id}>
                           <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -216,7 +217,11 @@ export function ServiceChargeView({
                             {unit.owner_name}
                           </td>
                           <td className="px-4 py-3">
-                            {s?.paid ? (
+                            {notLiable ? (
+                              <span className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                                Not liable
+                              </span>
+                            ) : s?.paid ? (
                               <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
                                 Paid
                               </span>
@@ -231,7 +236,9 @@ export function ServiceChargeView({
                             )}
                           </td>
                           <td className="px-4 py-3 text-right text-sm">
-                            {s?.paid ? (
+                            {notLiable ? (
+                              <span className="text-zinc-400">—</span>
+                            ) : s?.paid ? (
                               formatCurrency(s.amountPerUnit)
                             ) : partial ? (
                               <span>

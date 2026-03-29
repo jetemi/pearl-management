@@ -190,15 +190,17 @@ function ServiceChargeStatus({
     amountOwed: number;
     amountPaid: number;
     dueDate: string | null;
+    obligationApplies: boolean;
   }[];
 }) {
-  const outstanding = status.filter((s) => !s.paid);
-  const paid = status.filter((s) => s.paid);
+  const relevant = status.filter((s) => s.obligationApplies);
+  const outstanding = relevant.filter((s) => !s.paid);
+  const paid = relevant.filter((s) => s.paid);
 
-  if (status.length === 0) {
+  if (relevant.length === 0) {
     return (
       <p className="text-zinc-500 dark:text-zinc-400">
-        No service charge periods defined yet.
+        No service charge periods apply to your unit yet.
       </p>
     );
   }

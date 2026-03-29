@@ -1,10 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
-import { addUnit, addResidentToUnit, importUnitsFromCSV } from "@/lib/actions/units";
+import {
+  addUnit,
+  addResidentToUnit,
+  importUnitsFromCSV,
+  updateUnit,
+} from "@/lib/actions/units";
 
 export interface Unit {
   id: string;
@@ -15,12 +20,21 @@ export interface Unit {
   is_active: boolean;
   /** When omitted (pre-migration), treat as true. */
   diesel_participates?: boolean;
+  /** First date this unit is liable for service charge; null = all periods (legacy). */
+  service_charge_obligation_start?: string | null;
+  /** Diesel cycles from this number onward; null = all cycles (legacy). */
+  diesel_obligation_from_cycle_number?: number | null;
   created_at: string;
 }
 
 export function UnitsTable({ units }: { units: Unit[] }) {
+  const router = useRouter();
   const [list, setList] = useState(units);
   const [editing, setEditing] = useState<string | null>(null);
+
+  useEffect(() => {
+    setList(units);
+  }, [units]);
 
   async function toggleActive(unit: Unit) {
     const supabase = createClient();
@@ -45,13 +59,22 @@ export function UnitsTable({ units }: { units: Unit[] }) {
   async function handleUpdate(
     id: string,
     data: Partial<
-      Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">
+      Pick<
+        Unit,
+        | "flat_number"
+        | "owner_name"
+        | "phone"
+        | "email"
+        | "diesel_participates"
+        | "service_charge_obligation_start"
+        | "diesel_obligation_from_cycle_number"
+      >
     >
   ) {
-    const supabase = createClient();
-    const { error } = await supabase.from("units").update(data).eq("id", id);
-    if (error) {
-      toast.error(error.message);
+    try {
+      await updateUnit(id, data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
       return;
     }
     setList((prev) =>
@@ -59,6 +82,7 @@ export function UnitsTable({ units }: { units: Unit[] }) {
     );
     setEditing(null);
     toast.success("Unit updated");
+    router.refresh();
   }
 
   return (
@@ -144,7 +168,9 @@ export function UnitsTable({ units }: { units: Unit[] }) {
                   editing={editing === unit.id}
                   onEdit={() => setEditing(unit.id)}
                   onCancel={() => setEditing(null)}
-                  onSave={(data) => handleUpdate(unit.id, data)}
+                  onSave={async (data) => {
+                    await handleUpdate(unit.id, data);
+                  }}
                 />
               </td>
             </tr>
@@ -171,7 +197,20 @@ function EditUnitButton({
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
-  onSave: (data: Partial<Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">>) => void;
+  onSave: (
+    data: Partial<
+      Pick<
+        Unit,
+        | "flat_number"
+        | "owner_name"
+        | "phone"
+        | "email"
+        | "diesel_participates"
+        | "service_charge_obligation_start"
+        | "diesel_obligation_from_cycle_number"
+      >
+    >
+  ) => void | Promise<void>;
 }) {
   if (!editing) {
     return (
@@ -198,7 +237,20 @@ function EditUnitForm({
   onCancel,
 }: {
   unit: Unit;
-  onSave: (data: Partial<Pick<Unit, "flat_number" | "owner_name" | "phone" | "email" | "diesel_participates">>) => void;
+  onSave: (
+    data: Partial<
+      Pick<
+        Unit,
+        | "flat_number"
+        | "owner_name"
+        | "phone"
+        | "email"
+        | "diesel_participates"
+        | "service_charge_obligation_start"
+        | "diesel_obligation_from_cycle_number"
+      >
+    >
+  ) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [flat, setFlat] = useState(unit.flat_number);
@@ -206,9 +258,17 @@ function EditUnitForm({
   const [phone, setPhone] = useState(unit.phone ?? "");
   const [email, setEmail] = useState(unit.email ?? "");
   const [diesel, setDiesel] = useState(unit.diesel_participates ?? true);
+  const [svcStart, setSvcStart] = useState(
+    unit.service_charge_obligation_start?.slice(0, 10) ?? ""
+  );
+  const [dieselFrom, setDieselFrom] = useState(
+    unit.diesel_obligation_from_cycle_number != null
+      ? String(unit.diesel_obligation_from_cycle_number)
+      : ""
+  );
 
   return (
-    <div className="inline-flex flex-wrap items-center gap-2">
+    <div className="inline-flex max-w-full flex-col gap-2 sm:inline-flex sm:flex-row sm:flex-wrap sm:items-center">
       <input
         value={flat}
         onChange={(e) => setFlat(e.target.value)}
@@ -242,16 +302,49 @@ function EditUnitForm({
         />
         On generator
       </label>
+      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="whitespace-nowrap">SC from</span>
+        <input
+          type="date"
+          value={svcStart}
+          onChange={(e) => setSvcStart(e.target.value)}
+          className="w-36 rounded border px-1 py-0.5 text-xs"
+          title="Service charge obligation start (blank = all periods)"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="whitespace-nowrap">Diesel from #</span>
+        <input
+          type="number"
+          min={1}
+          value={dieselFrom}
+          onChange={(e) => setDieselFrom(e.target.value)}
+          placeholder="all"
+          className="w-16 rounded border px-1 py-0.5 text-xs"
+          title="First diesel cycle this unit owes (blank = from cycle 1)"
+        />
+      </label>
       <button
-        onClick={() =>
-          onSave({
+        onClick={async () => {
+          let dieselCycle: number | null = null;
+          if (dieselFrom.trim() !== "") {
+            const n = parseInt(dieselFrom, 10);
+            if (!Number.isFinite(n) || n < 1) {
+              toast.error("Diesel cycle # must be a positive integer");
+              return;
+            }
+            dieselCycle = n;
+          }
+          await onSave({
             flat_number: flat,
             owner_name: owner,
             phone: phone || null,
             email: email || null,
             diesel_participates: diesel,
-          })
-        }
+            service_charge_obligation_start: svcStart.trim() || null,
+            diesel_obligation_from_cycle_number: dieselCycle,
+          });
+        }}
         className="text-sm text-emerald-600 hover:text-emerald-700"
       >
         Save

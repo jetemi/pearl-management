@@ -77,12 +77,16 @@ export default async function ReportsPage() {
         (units ?? []).map(async (unit) => {
           const status = await getUnitServiceChargeStatus(supabase, unit.id);
           const s = status.find((sp) => sp.periodId === period.id);
+          const applies = s?.obligationApplies ?? true;
           return {
             flat_number: unit.flat_number,
             owner_name: unit.owner_name,
+            obligationApplies: applies,
             paid: s?.paid ?? false,
             amountPaid: s?.amountPaid ?? 0,
-            amountOwed: s?.amountOwed ?? Number(period.amount_per_unit),
+            amountOwed: applies
+              ? (s?.amountOwed ?? Number(period.amount_per_unit))
+              : 0,
             amountPerUnit: s?.amountPerUnit ?? Number(period.amount_per_unit),
           };
         })

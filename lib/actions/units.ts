@@ -2,6 +2,22 @@
 
 import { createClient } from "@/lib/supabase/server";
 
+/** Obligation window for new units: service charge from today; diesel from current open cycle if any. */
+async function getNewUnitObligationDefaults(
+  supabase: Awaited<ReturnType<typeof createClient>>
+) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: open } = await supabase
+    .from("diesel_cycles")
+    .select("cycle_number")
+    .is("closed_at", null)
+    .maybeSingle();
+  return {
+    service_charge_obligation_start: today,
+    diesel_obligation_from_cycle_number: open?.cycle_number ?? null,
+  };
+}
+
 export async function addUnit(data: {
   flat_number: string;
   owner_name: string;
@@ -10,6 +26,7 @@ export async function addUnit(data: {
   diesel_participates?: boolean;
 }) {
   const supabase = await createClient();
+  const defaults = await getNewUnitObligationDefaults(supabase);
 
   const { data: newUnit, error: unitError } = await supabase
     .from("units")
@@ -19,6 +36,7 @@ export async function addUnit(data: {
       phone: data.phone?.trim() || null,
       email: data.email?.trim() || null,
       diesel_participates: data.diesel_participates ?? true,
+      ...defaults,
     })
     .select("id")
     .single();
@@ -77,10 +95,51 @@ export async function addResidentToUnit(unitId: string, email: string) {
   return { success: true };
 }
 
+export async function updateUnit(
+  id: string,
+  data: Partial<{
+    flat_number: string;
+    owner_name: string;
+    phone: string | null;
+    email: string | null;
+    diesel_participates: boolean;
+    service_charge_obligation_start: string | null;
+    diesel_obligation_from_cycle_number: number | null;
+  }>
+) {
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("units")
+    .select("diesel_participates")
+    .eq("id", id)
+    .single();
+
+  const payload: Record<string, unknown> = { ...data };
+
+  if (
+    data.diesel_participates === true &&
+    existing &&
+    existing.diesel_participates === false
+  ) {
+    const { data: open } = await supabase
+      .from("diesel_cycles")
+      .select("cycle_number")
+      .is("closed_at", null)
+      .maybeSingle();
+    if (open) {
+      payload.diesel_obligation_from_cycle_number = open.cycle_number;
+    }
+  }
+
+  const { error } = await supabase.from("units").update(payload).eq("id", id);
+  if (error) throw error;
+}
+
 export async function importUnitsFromCSV(
   rows: { flat_number: string; owner_name: string; phone: string | null; email: string | null }[]
 ) {
   const supabase = await createClient();
+  const defaults = await getNewUnitObligationDefaults(supabase);
   const results: { flat: string; success: boolean; error?: string }[] = [];
 
   for (const row of rows) {
@@ -96,6 +155,7 @@ export async function importUnitsFromCSV(
       owner_name: owner,
       phone: row.phone?.trim() || null,
       email: row.email?.trim() || null,
+      ...defaults,
     });
 
     if (error) {
