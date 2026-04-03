@@ -14,7 +14,19 @@ interface UnitStatus {
   status: ServiceChargePeriodStatus[];
 }
 
-interface Period {
+export type ObligationOption = {
+  id: string;
+  unit_id: string;
+  label: string;
+  amount: number;
+  period_start: string;
+  period_end: string;
+  period_template_id: string | null;
+  flat_number: string;
+  owner_name: string;
+};
+
+interface LevyTemplate {
   id: string;
   period_label: string;
   amount_per_unit: number;
@@ -22,47 +34,56 @@ interface Period {
   created_at: string;
 }
 
+function formatWindow(start: string | null, end: string | null) {
+  if (!start || !end) return "—";
+  return `${format(new Date(start), "MMM d, yyyy")} – ${format(new Date(end), "MMM d, yyyy")}`;
+}
+
 export function ServiceChargeView({
-  periods,
+  templates,
+  obligationOptions,
   units,
   unitStatuses,
   unitsWithEmail,
 }: {
-  periods: Period[];
+  templates: LevyTemplate[];
+  obligationOptions: ObligationOption[];
   units: { id: string; flat_number: string; owner_name: string }[];
   unitStatuses: UnitStatus[];
   unitsWithEmail: { id: string; flat_number: string; owner_name: string; email: string | null }[];
 }) {
   const router = useRouter();
-  const [showNewPeriod, setShowNewPeriod] = useState(false);
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [showNewObligation, setShowNewObligation] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(
-    periods[0]?.id ?? null
+  /** null = all levies; otherwise filter by template id */
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    templates[0]?.id ?? null
   );
 
-  const selectedPeriod = periods.find((p) => p.id === selectedPeriodId);
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
-  const getUnitStatusForPeriod = (unitId: string) => {
-    const us = unitStatuses.find((u) => u.unit.id === unitId);
-    return us?.status.find((s) => s.periodId === selectedPeriodId) ?? null;
-  };
+  const tableRows = unitStatuses.flatMap(({ unit, status }) =>
+    status
+      .filter((s) => {
+        if (!s.obligationApplies) return false;
+        if (selectedTemplateId === null) return true;
+        return s.templateId === selectedTemplateId;
+      })
+      .map((s) => ({ unit, s }))
+  );
 
-  const defaultersForPeriod = unitStatuses.filter((us) => {
-    const s = us.status.find((sp) => sp.periodId === selectedPeriodId);
-    return s && !s.paid && s.obligationApplies;
-  });
+  const defaultersRows = tableRows.filter(({ s }) => !s.paid);
 
-  const defaultersWithEmail = defaultersForPeriod
-    .map(({ unit }) => {
+  const defaultersWithEmail = defaultersRows
+    .map(({ unit, s }) => {
       const u = unitsWithEmail.find((x) => x.id === unit.id);
-      const s = getUnitStatusForPeriod(unit.id);
       return u
         ? {
             flat_number: unit.flat_number,
             owner_name: unit.owner_name,
             email: u.email,
-            amountOwed:
-              s?.amountOwed ?? Number(selectedPeriod?.amount_per_unit ?? 0),
+            amountOwed: s.amountOwed,
           }
         : null;
     })
@@ -77,21 +98,27 @@ export function ServiceChargeView({
       } => !!row
     );
 
+  const exportLabel =
+    selectedTemplateId === null
+      ? "all-levies"
+      : selectedTemplate?.period_label.replace(/\s+/g, "-") ?? "levy";
+
   const handleExportDefaulters = () => {
-    if (!selectedPeriod) return;
-    const rows = defaultersForPeriod.map(({ unit }) => {
-      const s = getUnitStatusForPeriod(unit.id);
-      const isPartial = s && !s.paid && s.amountPaid > 0;
+    if (defaultersRows.length === 0) return;
+    const rows = defaultersRows.map(({ unit, s }) => {
+      const isPartial = !s.paid && s.amountPaid > 0;
       return {
-        period: selectedPeriod.period_label,
+        period: s.periodLabel,
+        period_window: formatWindow(s.periodStart, s.periodEnd),
         flat_number: unit.flat_number,
         owner_name: unit.owner_name,
-        amount: s?.amountOwed ?? Number(selectedPeriod.amount_per_unit),
+        amount: s.amountOwed,
         status: isPartial ? "Partial" : "Outstanding",
       };
     });
     const csv = exportToCSV(rows, [
-      { key: "period", header: "Period" },
+      { key: "period", header: "Levy" },
+      { key: "period_window", header: "Window" },
       { key: "flat_number", header: "Flat" },
       { key: "owner_name", header: "Owner" },
       { key: "amount", header: "Amount (₦)" },
@@ -101,28 +128,40 @@ export function ServiceChargeView({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `service-charge-defaulters-${selectedPeriod.period_label.replace(/\s+/g, "-")}.csv`;
+    a.download = `service-charge-defaulters-${exportLabel}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const emailPeriodLabel =
+    selectedTemplateId === null
+      ? "Service charge (all selected levies)"
+      : selectedTemplate?.period_label ?? "Service charge";
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <button
-          onClick={() => setShowNewPeriod(true)}
+          onClick={() => setShowNewTemplate(true)}
           className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
-          Create new period
+          Create levy template
+        </button>
+        <button
+          onClick={() => setShowNewObligation(true)}
+          disabled={units.length === 0}
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Add levy for flat
         </button>
         <button
           onClick={() => setShowRecordPayment(true)}
-          disabled={periods.length === 0}
+          disabled={obligationOptions.length === 0}
           className="rounded-md border border-emerald-600 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-900/20"
         >
           Record payment
         </button>
-        {selectedPeriod && defaultersForPeriod.length > 0 && (
+        {defaultersRows.length > 0 && (
           <>
             <button
               onClick={handleExportDefaulters}
@@ -131,59 +170,77 @@ export function ServiceChargeView({
               Export defaulters CSV
             </button>
             <EmailDefaultersButton
-              periodLabel={selectedPeriod.period_label}
+              periodLabel={emailPeriodLabel}
               defaulters={defaultersWithEmail}
             />
           </>
         )}
       </div>
 
-      {periods.length === 0 ? (
+      {templates.length === 0 ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-900/20">
           <p className="text-amber-800 dark:text-amber-200">
-            No service charge periods yet. Create a period (e.g. &quot;2025
-            Annual Levy&quot;) to begin recording payments.
+            No levy templates yet. Create a template (default amount for new levies) to begin.
           </p>
         </div>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
-            {periods.map((p) => (
+            <button
+              type="button"
+              onClick={() => setSelectedTemplateId(null)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                selectedTemplateId === null
+                  ? "bg-emerald-600 text-white"
+                  : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              }`}
+            >
+              All levies
+            </button>
+            {templates.map((t) => (
               <button
-                key={p.id}
-                onClick={() => setSelectedPeriodId(p.id)}
+                key={t.id}
+                type="button"
+                onClick={() => setSelectedTemplateId(t.id)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                  selectedPeriodId === p.id
+                  selectedTemplateId === t.id
                     ? "bg-emerald-600 text-white"
                     : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 }`}
               >
-                {p.period_label}
+                {t.period_label}
               </button>
             ))}
           </div>
 
-          {selectedPeriod && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
-                <span className="font-medium">
-                  {selectedPeriod.period_label}
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              {selectedTemplateId === null ? (
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                  All levies (per-flat amounts and windows)
                 </span>
-                <span className="text-zinc-600 dark:text-zinc-400">
-                  ₦{Number(selectedPeriod.amount_per_unit).toLocaleString()} per
-                  unit
-                </span>
-                {selectedPeriod.due_date && (
-                  <span className="text-sm text-zinc-500">
-                    Due:{" "}
-                    {format(
-                      new Date(selectedPeriod.due_date),
-                      "MMM d, yyyy"
-                    )}
+              ) : selectedTemplate ? (
+                <>
+                  <span className="font-medium">{selectedTemplate.period_label}</span>
+                  <span className="text-zinc-600 dark:text-zinc-400">
+                    Default ₦{Number(selectedTemplate.amount_per_unit).toLocaleString()}
                   </span>
-                )}
-              </div>
+                  {selectedTemplate.due_date && (
+                    <span className="text-sm text-zinc-500">
+                      Template due:{" "}
+                      {format(new Date(selectedTemplate.due_date), "MMM d, yyyy")}
+                    </span>
+                  )}
+                </>
+              ) : null}
+            </div>
 
+            {tableRows.length === 0 ? (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                No levy obligations for this filter. Use &quot;Add levy for flat&quot; to assign
+                an amount and billing window to a unit.
+              </p>
+            ) : (
               <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
                 <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-800">
                   <thead className="bg-zinc-50 dark:bg-zinc-900">
@@ -195,6 +252,12 @@ export function ServiceChargeView({
                         Owner
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                        Levy
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+                        Window
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
                         Status
                       </th>
                       <th className="px-4 py-3 text-right text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
@@ -203,25 +266,24 @@ export function ServiceChargeView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-                    {unitStatuses.map(({ unit }) => {
-                      const s = getUnitStatusForPeriod(unit.id);
-                      const partial =
-                        s && !s.paid && s.amountPaid > 0;
-                      const notLiable = s && !s.obligationApplies;
+                    {tableRows.map(({ unit, s }) => {
+                      const partial = !s.paid && s.amountPaid > 0;
                       return (
-                        <tr key={unit.id}>
+                        <tr key={s.periodId}>
                           <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                             {unit.flat_number}
                           </td>
                           <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
                             {unit.owner_name}
                           </td>
+                          <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+                            {s.periodLabel}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                            {formatWindow(s.periodStart, s.periodEnd)}
+                          </td>
                           <td className="px-4 py-3">
-                            {notLiable ? (
-                              <span className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                                Not liable
-                              </span>
-                            ) : s?.paid ? (
+                            {s.paid ? (
                               <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
                                 Paid
                               </span>
@@ -236,9 +298,7 @@ export function ServiceChargeView({
                             )}
                           </td>
                           <td className="px-4 py-3 text-right text-sm">
-                            {notLiable ? (
-                              <span className="text-zinc-400">—</span>
-                            ) : s?.paid ? (
+                            {s.paid ? (
                               formatCurrency(s.amountPerUnit)
                             ) : partial ? (
                               <span>
@@ -256,13 +316,11 @@ export function ServiceChargeView({
                             ) : (
                               <span>
                                 <span className="font-medium text-amber-800 dark:text-amber-200">
-                                  {formatCurrency(s?.amountOwed ?? 0)}
+                                  {formatCurrency(s.amountOwed)}
                                 </span>
                                 <span className="text-zinc-500"> / </span>
                                 <span className="text-zinc-500">
-                                  {formatCurrency(
-                                    Number(selectedPeriod.amount_per_unit)
-                                  )}
+                                  {formatCurrency(s.amountPerUnit)}
                                 </span>
                               </span>
                             )}
@@ -273,26 +331,41 @@ export function ServiceChargeView({
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
 
-      {showNewPeriod && (
-        <CreatePeriodModal
-          onClose={() => setShowNewPeriod(false)}
+      {showNewTemplate && (
+        <CreateTemplateModal
+          onClose={() => setShowNewTemplate(false)}
           onCreated={() => {
-            setShowNewPeriod(false);
+            setShowNewTemplate(false);
             router.refresh();
           }}
         />
       )}
 
-      {showRecordPayment && periods.length > 0 && (
-        <RecordPaymentModal
-          periods={periods}
-          initialPeriodId={selectedPeriodId}
+      {showNewObligation && (
+        <CreateObligationModal
+          templates={templates}
           units={units}
+          onClose={() => setShowNewObligation(false)}
+          onCreated={() => {
+            setShowNewObligation(false);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {showRecordPayment && obligationOptions.length > 0 && (
+        <RecordPaymentModal
+          obligations={obligationOptions}
+          initialObligationId={
+            tableRows[0]?.s.periodId ??
+            obligationOptions[0]?.id ??
+            null
+          }
           onClose={() => setShowRecordPayment(false)}
           onRecorded={() => {
             setShowRecordPayment(false);
@@ -336,7 +409,10 @@ function EmailDefaultersButton({
         }))
       );
       if (result.success) {
-        const n = "sent" in result && typeof result.sent === "number" ? result.sent : withEmail.length;
+        const n =
+          "sent" in result && typeof result.sent === "number"
+            ? result.sent
+            : withEmail.length;
         toast.success(`Reminder sent to ${n} resident(s)`);
       } else {
         toast.error(
@@ -365,7 +441,7 @@ function EmailDefaultersButton({
   );
 }
 
-function CreatePeriodModal({
+function CreateTemplateModal({
   onClose,
   onCreated,
 }: {
@@ -390,7 +466,7 @@ function CreatePeriodModal({
         due_date: dueDate || null,
       });
       if (error) throw error;
-      toast.success("Period created");
+      toast.success("Template created");
       onCreated();
       router.refresh();
     } catch (err) {
@@ -403,23 +479,25 @@ function CreatePeriodModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
-        <h3 className="mb-4 text-lg font-semibold">Create service charge period</h3>
+        <h3 className="mb-4 text-lg font-semibold">Create levy template</h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          Default amount per unit when you add a levy for a flat from this template. Each flat
+          can still get a custom amount and billing window.
+        </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              Period label
-            </label>
+            <label className="mb-1 block text-sm font-medium">Template label</label>
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
-              placeholder="e.g. 2025 Annual Levy"
+              placeholder="e.g. 2026 Annual Levy"
               required
             />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">
-              Amount per unit (₦)
+              Default amount (₦)
             </label>
             <input
               type="number"
@@ -432,7 +510,7 @@ function CreatePeriodModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Due date</label>
+            <label className="mb-1 block text-sm font-medium">Reference due date (optional)</label>
             <input
               type="date"
               value={dueDate}
@@ -462,47 +540,205 @@ function CreatePeriodModal({
   );
 }
 
-function RecordPaymentModal({
-  periods,
-  initialPeriodId,
+function CreateObligationModal({
+  templates,
   units,
+  onClose,
+  onCreated,
+}: {
+  templates: LevyTemplate[];
+  units: { id: string; flat_number: string; owner_name: string }[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const router = useRouter();
+  const [unitId, setUnitId] = useState("");
+  const [templateId, setTemplateId] = useState<string>("");
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  function onTemplateChange(id: string) {
+    setTemplateId(id);
+    if (!id) return;
+    const t = templates.find((x) => x.id === id);
+    if (t) {
+      setLabel(t.period_label);
+      setAmount(String(Number(t.amount_per_unit)));
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!unitId || !label.trim() || !amount || parseFloat(amount) <= 0) return;
+    if (!periodStart || !periodEnd) {
+      toast.error("Start and end dates are required");
+      return;
+    }
+    if (periodEnd < periodStart) {
+      toast.error("End date must be on or after start date");
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.from("service_charge_obligations").insert({
+        unit_id: unitId,
+        period_template_id: templateId || null,
+        label: label.trim(),
+        amount: parseFloat(amount),
+        period_start: periodStart,
+        period_end: periodEnd,
+      });
+      if (error) throw error;
+      toast.success("Levy added for flat");
+      onCreated();
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-4 text-lg font-semibold">Add levy for flat</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Flat</label>
+            <select
+              value={unitId}
+              onChange={(e) => setUnitId(e.target.value)}
+              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+              required
+            >
+              <option value="">Select unit</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.flat_number} — {u.owner_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Template (optional)</label>
+            <select
+              value={templateId}
+              onChange={(e) => onTemplateChange(e.target.value)}
+              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+            >
+              <option value="">None — custom levy</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.period_label} (default ₦{Number(t.amount_per_unit).toLocaleString()})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Levy label</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+              placeholder="e.g. 2026/27 service charge"
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Amount (₦)</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+              min="0"
+              step="0.01"
+              required
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Period start</label>
+              <input
+                type="date"
+                value={periodStart}
+                onChange={(e) => setPeriodStart(e.target.value)}
+                className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Period end</label>
+              <input
+                type="date"
+                value={periodEnd}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+                className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+                required
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-4 py-2 text-zinc-600 hover:text-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {loading ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function RecordPaymentModal({
+  obligations,
+  initialObligationId,
   onClose,
   onRecorded,
 }: {
-  periods: Period[];
-  initialPeriodId: string | null;
-  units: { id: string; flat_number: string; owner_name: string }[];
+  obligations: ObligationOption[];
+  initialObligationId: string | null;
   onClose: () => void;
   onRecorded: () => void;
 }) {
   const router = useRouter();
-  const defaultPeriodId = initialPeriodId ?? periods[0]?.id ?? "";
-  const defaultPeriod = periods.find((p) => p.id === defaultPeriodId) ?? periods[0];
+  const defaultId = initialObligationId ?? obligations[0]?.id ?? "";
+  const defaultOb = obligations.find((o) => o.id === defaultId) ?? obligations[0];
 
-  const [recordPeriodId, setRecordPeriodId] = useState(defaultPeriodId);
-  const [unitId, setUnitId] = useState("");
-  const [amount, setAmount] = useState(
-    String(Number(defaultPeriod?.amount_per_unit ?? 0))
-  );
+  const [obligationId, setObligationId] = useState(defaultId);
+  const [amount, setAmount] = useState(String(defaultOb?.amount ?? 0));
   const [paymentRef, setPaymentRef] = useState("");
   const [paymentDate, setPaymentDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
   const [loading, setLoading] = useState(false);
 
-  const selectedPeriod = periods.find((p) => p.id === recordPeriodId);
+  const selected = obligations.find((o) => o.id === obligationId);
 
-  function handlePeriodChange(id: string) {
-    setRecordPeriodId(id);
-    const p = periods.find((x) => x.id === id);
-    if (p) {
-      setAmount(String(Number(p.amount_per_unit)));
-    }
+  function handleObligationChange(id: string) {
+    setObligationId(id);
+    const o = obligations.find((x) => x.id === id);
+    if (o) setAmount(String(o.amount));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!unitId || !recordPeriodId) return;
+    if (!obligationId || !selected) return;
     setLoading(true);
     try {
       const supabase = createClient();
@@ -510,8 +746,8 @@ function RecordPaymentModal({
         data: { user },
       } = await supabase.auth.getUser();
       const { error } = await supabase.from("service_charge_payments").insert({
-        period_id: recordPeriodId,
-        unit_id: unitId,
+        obligation_id: obligationId,
+        unit_id: selected.unit_id,
         amount_paid: parseFloat(amount),
         payment_date: paymentDate,
         payment_ref: paymentRef.trim() || null,
@@ -530,52 +766,32 @@ function RecordPaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
         <h3 className="mb-1 text-lg font-semibold">Record service charge payment</h3>
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-          Post this amount against the selected period for the chosen unit.
+          Post this amount against the selected levy for that flat.
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Service charge period</label>
+            <label className="mb-1 block text-sm font-medium">Levy</label>
             <select
-              value={recordPeriodId}
-              onChange={(e) => handlePeriodChange(e.target.value)}
+              value={obligationId}
+              onChange={(e) => handleObligationChange(e.target.value)}
               className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
               required
             >
-              {periods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.period_label}
-                  {p.due_date
-                    ? ` (due ${format(new Date(p.due_date), "MMM d, yyyy")})`
-                    : ""}
-                  {" "}
-                  — ₦{Number(p.amount_per_unit).toLocaleString()}
+              {obligations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.flat_number} — {o.label} ({formatWindow(o.period_start, o.period_end)}) ₦
+                  {Number(o.amount).toLocaleString()}
                 </option>
               ))}
             </select>
-            {selectedPeriod?.due_date && (
+            {selected && (
               <p className="mt-1 text-xs text-zinc-500">
-                Due: {format(new Date(selectedPeriod.due_date), "MMM d, yyyy")}
+                {selected.owner_name} · {formatWindow(selected.period_start, selected.period_end)}
               </p>
             )}
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Unit</label>
-            <select
-              value={unitId}
-              onChange={(e) => setUnitId(e.target.value)}
-              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
-              required
-            >
-              <option value="">Select unit</option>
-              {units.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.flat_number} — {u.owner_name}
-                </option>
-              ))}
-            </select>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Amount (₦)</label>
@@ -590,9 +806,7 @@ function RecordPaymentModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              Payment date
-            </label>
+            <label className="mb-1 block text-sm font-medium">Payment date</label>
             <input
               type="date"
               value={paymentDate}
@@ -602,9 +816,7 @@ function RecordPaymentModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              Payment reference
-            </label>
+            <label className="mb-1 block text-sm font-medium">Payment reference</label>
             <input
               value={paymentRef}
               onChange={(e) => setPaymentRef(e.target.value)}

@@ -296,34 +296,35 @@ export function formatCurrency(amount: number): string {
 }
 
 export interface ServiceChargePeriodStatus {
+  /** service_charge_obligations.id */
   periodId: string;
   periodLabel: string;
   amountPerUnit: number;
+  /** Window end (same as periodEnd for display). */
   dueDate: string | null;
-  /** False when period is before this unit's service_charge_obligation_start. */
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** service_charge_periods id when levy was created from a template. */
+  templateId: string | null;
+  /**
+   * False when this levy window is before the unit's service_charge_obligation_start
+   * (legacy filter; new model uses per-obligation windows).
+   */
   obligationApplies: boolean;
-  /** True when payments recorded for this period meet or exceed the levy. */
   paid: boolean;
-  /** Sum posted to this period (same as amountRecorded for applicable periods). */
   amountPaid: number;
-  /** Sum of payment rows recorded against this period. */
   amountRecorded: number;
-  /** Remaining obligation for this period. */
   amountOwed: number;
   paymentDate: string | null;
 }
 
-/** Whether this global period counts toward the unit's obligation (due_date or created_at vs start). */
-export function isServiceChargePeriodApplicable(
-  period: { due_date: string | null; created_at: string },
-  obligationStart: string | null | undefined
+/** Whether a levy row applies given the unit's first liability date (if set). */
+export function isServiceChargeObligationApplicable(
+  obligation: { period_start: string },
+  unitObligationStart: string | null | undefined
 ): boolean {
-  if (!obligationStart) return true;
-  if (period.due_date) {
-    return period.due_date >= obligationStart;
-  }
-  const createdDay = period.created_at.slice(0, 10);
-  return createdDay >= obligationStart;
+  if (!unitObligationStart) return true;
+  return obligation.period_start >= unitObligationStart;
 }
 
 export async function getUnitServiceChargeStatus(
@@ -336,49 +337,56 @@ export async function getUnitServiceChargeStatus(
     .eq("id", unitId)
     .single();
 
-  const obligationStart = unitRow?.service_charge_obligation_start ?? null;
+  const unitStart = unitRow?.service_charge_obligation_start ?? null;
 
-  const { data: periods } = await supabase
-    .from("service_charge_periods")
-    .select("id, period_label, amount_per_unit, due_date, created_at")
-    .order("due_date", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true });
+  const { data: obligations } = await supabase
+    .from("service_charge_obligations")
+    .select(
+      "id, label, amount, period_start, period_end, period_template_id"
+    )
+    .eq("unit_id", unitId)
+    .order("period_start", { ascending: true });
 
-  const periodsList = periods ?? [];
+  const obligationRows = obligations ?? [];
 
   const { data: payments } = await supabase
     .from("service_charge_payments")
-    .select("period_id, amount_paid, payment_date")
+    .select("obligation_id, amount_paid, payment_date")
     .eq("unit_id", unitId);
 
   const paymentRows = payments ?? [];
 
-  const recordedByPeriod = new Map<
+  const recordedByObligation = new Map<
     string,
     { sum: number; lastDate: string | null }
   >();
   for (const p of paymentRows) {
-    const pid = p.period_id;
-    const cur = recordedByPeriod.get(pid) ?? { sum: 0, lastDate: null };
+    const oid = p.obligation_id;
+    const cur = recordedByObligation.get(oid) ?? { sum: 0, lastDate: null };
     const sum = cur.sum + Number(p.amount_paid);
     const pd = p.payment_date;
     let lastDate = cur.lastDate;
     if (pd && (!lastDate || pd > lastDate)) lastDate = pd;
-    recordedByPeriod.set(pid, { sum, lastDate });
+    recordedByObligation.set(oid, { sum, lastDate });
   }
 
-  return periodsList.map((period) => {
-    const applies = isServiceChargePeriodApplicable(period, obligationStart);
-    const expected = Number(period.amount_per_unit);
-    const rec = recordedByPeriod.get(period.id);
+  return obligationRows.map((row) => {
+    const expected = Number(row.amount);
+    const rec = recordedByObligation.get(row.id);
     const amountRecorded = rec?.sum ?? 0;
+    const applies = isServiceChargeObligationApplicable(row, unitStart);
+    const periodStart = row.period_start;
+    const periodEnd = row.period_end;
 
     if (!applies) {
       return {
-        periodId: period.id,
-        periodLabel: period.period_label,
+        periodId: row.id,
+        periodLabel: row.label,
         amountPerUnit: expected,
-        dueDate: period.due_date,
+        dueDate: periodEnd,
+        periodStart,
+        periodEnd,
+        templateId: row.period_template_id,
         obligationApplies: false,
         paid: true,
         amountPaid: 0,
@@ -393,10 +401,13 @@ export async function getUnitServiceChargeStatus(
     const amountOwed = Math.max(0, expected - amountRecorded);
 
     return {
-      periodId: period.id,
-      periodLabel: period.period_label,
+      periodId: row.id,
+      periodLabel: row.label,
       amountPerUnit: expected,
-      dueDate: period.due_date,
+      dueDate: periodEnd,
+      periodStart,
+      periodEnd,
+      templateId: row.period_template_id,
       obligationApplies: true,
       paid,
       amountPaid: amountRecorded,

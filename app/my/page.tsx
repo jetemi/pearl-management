@@ -184,12 +184,15 @@ function ServiceChargeStatus({
   status,
 }: {
   status: {
+    periodId: string;
     periodLabel: string;
     paid: boolean;
     amountPerUnit: number;
     amountOwed: number;
     amountPaid: number;
     dueDate: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
     obligationApplies: boolean;
   }[];
 }) {
@@ -200,7 +203,7 @@ function ServiceChargeStatus({
   if (relevant.length === 0) {
     return (
       <p className="text-zinc-500 dark:text-zinc-400">
-        No service charge periods apply to your unit yet.
+        No service charge levies are set up for your unit yet.
       </p>
     );
   }
@@ -217,8 +220,12 @@ function ServiceChargeStatus({
         </p>
         <ul className="mt-2 list-inside list-disc text-xs text-amber-800/90 dark:text-amber-200/90">
           {outstanding.map((s) => (
-            <li key={s.periodLabel}>
-              {s.periodLabel}: {formatCurrency(s.amountOwed)}
+            <li key={s.periodId}>
+              {s.periodLabel}
+              {s.periodStart && s.periodEnd
+                ? ` (${format(new Date(s.periodStart), "MMM d, yyyy")} – ${format(new Date(s.periodEnd), "MMM d, yyyy")})`
+                : null}
+              : {formatCurrency(s.amountOwed)}
               {s.amountPaid > 0 && s.amountOwed > 0
                 ? ` (${formatCurrency(s.amountPaid)} covered, ${formatCurrency(s.amountOwed)} remaining)`
                 : null}
@@ -235,7 +242,7 @@ function ServiceChargeStatus({
         All paid up
       </p>
       <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">
-        {paid.length} period(s) paid
+        {paid.length} levy(ies) settled
       </p>
     </div>
   );
