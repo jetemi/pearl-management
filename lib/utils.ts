@@ -295,31 +295,6 @@ export function formatCurrency(amount: number): string {
   return `₦${amount.toLocaleString()}`;
 }
 
-export interface ServiceChargePeriodAllocation {
-  periodId: string;
-  expected: number;
-  allocated: number;
-  shortfall: number;
-}
-
-export function allocatePaymentsToServiceChargePeriods(
-  periods: { id: string; amount_per_unit: number }[],
-  totalPaid: number
-): ServiceChargePeriodAllocation[] {
-  let remaining = totalPaid;
-  return periods.map((p) => {
-    const expected = Number(p.amount_per_unit);
-    const allocated = Math.min(expected, Math.max(0, remaining));
-    remaining -= allocated;
-    return {
-      periodId: p.id,
-      expected,
-      allocated,
-      shortfall: expected - allocated,
-    };
-  });
-}
-
 export interface ServiceChargePeriodStatus {
   periodId: string;
   periodLabel: string;
@@ -327,16 +302,13 @@ export interface ServiceChargePeriodStatus {
   dueDate: string | null;
   /** False when period is before this unit's service_charge_obligation_start. */
   obligationApplies: boolean;
-  /** True when waterfall-allocated amount fully covers this period. */
+  /** True when payments recorded for this period meet or exceed the levy. */
   paid: boolean;
-  /**
-   * Amount effectively covered toward this period (oldest-first allocation).
-   * Same meaning as diesel: surplus from earlier periods can count here.
-   */
+  /** Sum posted to this period (same as amountRecorded for applicable periods). */
   amountPaid: number;
-  /** Sum of payment rows recorded against this period (audit; may differ from amountPaid). */
+  /** Sum of payment rows recorded against this period. */
   amountRecorded: number;
-  /** Remaining obligation for this period after allocation. */
+  /** Remaining obligation for this period. */
   amountOwed: number;
   paymentDate: string | null;
 }
@@ -380,10 +352,6 @@ export async function getUnitServiceChargeStatus(
     .eq("unit_id", unitId);
 
   const paymentRows = payments ?? [];
-  const totalPaid = paymentRows.reduce(
-    (s, p) => s + Number(p.amount_paid),
-    0
-  );
 
   const recordedByPeriod = new Map<
     string,
@@ -398,23 +366,6 @@ export async function getUnitServiceChargeStatus(
     if (pd && (!lastDate || pd > lastDate)) lastDate = pd;
     recordedByPeriod.set(pid, { sum, lastDate });
   }
-
-  const applicablePeriods = periodsList.filter((p) =>
-    isServiceChargePeriodApplicable(p, obligationStart)
-  );
-
-  const orderedForAlloc = applicablePeriods.map((p) => ({
-    id: p.id,
-    amount_per_unit: Number(p.amount_per_unit),
-  }));
-
-  const breakdown = allocatePaymentsToServiceChargePeriods(
-    orderedForAlloc,
-    totalPaid
-  );
-  const allocById = new Map(
-    breakdown.map((b) => [b.periodId, b] as const)
-  );
 
   return periodsList.map((period) => {
     const applies = isServiceChargePeriodApplicable(period, obligationStart);
@@ -437,11 +388,9 @@ export async function getUnitServiceChargeStatus(
       };
     }
 
-    const alloc = allocById.get(period.id);
-    const allocated = alloc?.allocated ?? 0;
     const EPS = 1e-6;
-    const paid = allocated + EPS >= expected;
-    const amountOwed = Math.max(0, expected - allocated);
+    const paid = amountRecorded + EPS >= expected;
+    const amountOwed = Math.max(0, expected - amountRecorded);
 
     return {
       periodId: period.id,
@@ -450,7 +399,7 @@ export async function getUnitServiceChargeStatus(
       dueDate: period.due_date,
       obligationApplies: true,
       paid,
-      amountPaid: allocated,
+      amountPaid: amountRecorded,
       amountRecorded,
       amountOwed,
       paymentDate: rec?.lastDate ?? null,
@@ -538,12 +487,12 @@ export function generateWhatsAppDieselMessage(
       ? `_Flats on generator: ${flatsOnGenerator}_`
       : null,
     "",
+    ...paidLines,
+    "",
     ...outstandingLines,
     "",
     `*Please pay to:*`,
     bankDetails,
-    "",
-    ...paidLines,
     "",
     `Thank you ${WA.pray}`,
   ];

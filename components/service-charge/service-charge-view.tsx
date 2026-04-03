@@ -117,7 +117,7 @@ export function ServiceChargeView({
         </button>
         <button
           onClick={() => setShowRecordPayment(true)}
-          disabled={!selectedPeriod}
+          disabled={periods.length === 0}
           className="rounded-md border border-emerald-600 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-900/20"
         >
           Record payment
@@ -288,11 +288,10 @@ export function ServiceChargeView({
         />
       )}
 
-      {showRecordPayment && selectedPeriod && (
+      {showRecordPayment && periods.length > 0 && (
         <RecordPaymentModal
-          periodId={selectedPeriod.id}
-          periodLabel={selectedPeriod.period_label}
-          amountPerUnit={Number(selectedPeriod.amount_per_unit)}
+          periods={periods}
+          initialPeriodId={selectedPeriodId}
           units={units}
           onClose={() => setShowRecordPayment(false)}
           onRecorded={() => {
@@ -464,32 +463,46 @@ function CreatePeriodModal({
 }
 
 function RecordPaymentModal({
-  periodId,
-  periodLabel,
-  amountPerUnit,
+  periods,
+  initialPeriodId,
   units,
   onClose,
   onRecorded,
 }: {
-  periodId: string;
-  periodLabel: string;
-  amountPerUnit: number;
+  periods: Period[];
+  initialPeriodId: string | null;
   units: { id: string; flat_number: string; owner_name: string }[];
   onClose: () => void;
   onRecorded: () => void;
 }) {
   const router = useRouter();
+  const defaultPeriodId = initialPeriodId ?? periods[0]?.id ?? "";
+  const defaultPeriod = periods.find((p) => p.id === defaultPeriodId) ?? periods[0];
+
+  const [recordPeriodId, setRecordPeriodId] = useState(defaultPeriodId);
   const [unitId, setUnitId] = useState("");
-  const [amount, setAmount] = useState(amountPerUnit.toString());
+  const [amount, setAmount] = useState(
+    String(Number(defaultPeriod?.amount_per_unit ?? 0))
+  );
   const [paymentRef, setPaymentRef] = useState("");
   const [paymentDate, setPaymentDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
   const [loading, setLoading] = useState(false);
 
+  const selectedPeriod = periods.find((p) => p.id === recordPeriodId);
+
+  function handlePeriodChange(id: string) {
+    setRecordPeriodId(id);
+    const p = periods.find((x) => x.id === id);
+    if (p) {
+      setAmount(String(Number(p.amount_per_unit)));
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!unitId) return;
+    if (!unitId || !recordPeriodId) return;
     setLoading(true);
     try {
       const supabase = createClient();
@@ -497,7 +510,7 @@ function RecordPaymentModal({
         data: { user },
       } = await supabase.auth.getUser();
       const { error } = await supabase.from("service_charge_payments").insert({
-        period_id: periodId,
+        period_id: recordPeriodId,
         unit_id: unitId,
         amount_paid: parseFloat(amount),
         payment_date: paymentDate,
@@ -518,10 +531,36 @@ function RecordPaymentModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
-        <h3 className="mb-4 text-lg font-semibold">
-          Record payment — {periodLabel}
-        </h3>
+        <h3 className="mb-1 text-lg font-semibold">Record service charge payment</h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          Post this amount against the selected period for the chosen unit.
+        </p>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Service charge period</label>
+            <select
+              value={recordPeriodId}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+              className="w-full rounded border px-3 py-2 dark:bg-zinc-800"
+              required
+            >
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.period_label}
+                  {p.due_date
+                    ? ` (due ${format(new Date(p.due_date), "MMM d, yyyy")})`
+                    : ""}
+                  {" "}
+                  — ₦{Number(p.amount_per_unit).toLocaleString()}
+                </option>
+              ))}
+            </select>
+            {selectedPeriod?.due_date && (
+              <p className="mt-1 text-xs text-zinc-500">
+                Due: {format(new Date(selectedPeriod.due_date), "MMM d, yyyy")}
+              </p>
+            )}
+          </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Unit</label>
             <select
