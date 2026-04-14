@@ -1,7 +1,19 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentResident } from "@/lib/auth";
+import type { ResidentRole } from "@/lib/auth-roles";
 import { ResidentsTable } from "@/components/residents/residents-table";
+
+type DirectoryRow = {
+  id: string;
+  unit_id: string | null;
+  role: string;
+  phone: string | null;
+  flat_number: string | null;
+  owner_name: string | null;
+  unit_phone: string | null;
+  auth_email: string | null;
+};
 
 export default async function ResidentsPage() {
   const resident = await getCurrentResident();
@@ -21,25 +33,37 @@ export default async function ResidentsPage() {
   }
 
   const supabase = await createClient();
-  const { data: residents } = await supabase
-    .from("residents")
-    .select(
-      `
-      id,
-      unit_id,
-      role,
-      phone,
-      units (
-        flat_number,
-        owner_name,
-        phone
-      )
-    `
-    );
+  const { data: rows, error } = await supabase.rpc(
+    "get_residents_directory_for_chairman"
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const residents = (rows as DirectoryRow[] | null)?.map((r) => ({
+    id: r.id,
+    unit_id: r.unit_id,
+    role: r.role as ResidentRole,
+    phone: r.phone,
+    auth_email: r.auth_email,
+    units:
+      r.unit_id == null
+        ? null
+        : {
+            flat_number: r.flat_number ?? "",
+            owner_name: r.owner_name ?? "",
+            phone: r.unit_phone,
+          },
+  }));
 
   const sorted = (residents ?? []).sort((a, b) => {
-    const getFlat = (u: { units?: { flat_number?: string } | { flat_number?: string }[] | null }) =>
-      Array.isArray(u.units) ? u.units[0]?.flat_number ?? "" : u.units?.flat_number ?? "";
+    const getFlat = (u: {
+      units?: { flat_number?: string } | { flat_number?: string }[] | null;
+    }) =>
+      Array.isArray(u.units)
+        ? u.units[0]?.flat_number ?? ""
+        : u.units?.flat_number ?? "";
     const flatA = getFlat(a);
     const flatB = getFlat(b);
     if (flatA !== flatB) return flatA.localeCompare(flatB, undefined, { numeric: true });
@@ -50,7 +74,10 @@ export default async function ResidentsPage() {
       resident: 3,
       facility_manager: 4,
     };
-    return roleOrder[a.role as keyof typeof roleOrder] - roleOrder[b.role as keyof typeof roleOrder];
+    return (
+      roleOrder[a.role as keyof typeof roleOrder] -
+      roleOrder[b.role as keyof typeof roleOrder]
+    );
   });
 
   return (

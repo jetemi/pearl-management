@@ -1,5 +1,6 @@
 "use server";
 
+import { getCurrentResident } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
 /** Obligation window for new units: service charge from today; diesel from current open cycle if any. */
@@ -86,9 +87,18 @@ export async function addResidentToUnit(unitId: string, email: string) {
 
   if (error) {
     if (error.code === "23505") {
-      throw new Error(
-        "This person is already linked to a unit. Ask chairman to reassign."
-      );
+      const me = await getCurrentResident();
+      if (me?.role !== "chairman") {
+        throw new Error(
+          "This person is already linked (including the default Unit0). Only the chairman can move them to another unit."
+        );
+      }
+      const { error: updateError } = await supabase
+        .from("residents")
+        .update({ unit_id: unitId })
+        .eq("id", userId);
+      if (updateError) throw updateError;
+      return { success: true };
     }
     throw error;
   }

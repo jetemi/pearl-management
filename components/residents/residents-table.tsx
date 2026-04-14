@@ -11,6 +11,7 @@ interface ResidentRow {
   unit_id: string | null;
   role: ResidentRole;
   phone: string | null;
+  auth_email: string | null;
   units:
     | { flat_number: string; owner_name: string; phone: string | null }
     | {
@@ -61,6 +62,9 @@ export function ResidentsTable({ residents }: { residents: ResidentRow[] }) {
               Unit
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+              Email
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
               Role
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
@@ -76,6 +80,15 @@ export function ResidentsTable({ residents }: { residents: ResidentRow[] }) {
             <tr key={r.id}>
               <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                 {Array.isArray(r.units) ? r.units[0]?.flat_number : r.units?.flat_number ?? "—"}
+              </td>
+              <td className="max-w-[14rem] px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+                {r.auth_email ? (
+                  <span className="block truncate" title={r.auth_email}>
+                    {r.auth_email}
+                  </span>
+                ) : (
+                  "—"
+                )}
               </td>
               <td className="px-4 py-3">
                 <span
