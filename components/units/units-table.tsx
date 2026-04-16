@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
 import {
   addUnit,
   addResidentToUnit,
+  deactivateUnit,
+  getCurrentOpenCycleNumber,
   importUnitsFromCSV,
+  leaveGenerator,
+  reactivateUnit,
   updateUnit,
 } from "@/lib/actions/units";
 
@@ -22,8 +25,12 @@ export interface Unit {
   diesel_participates?: boolean;
   /** First date this unit is liable for service charge; null = all periods (legacy). */
   service_charge_obligation_start?: string | null;
+  /** Last date this unit is liable for service charge; null = ongoing. */
+  service_charge_obligation_end?: string | null;
   /** Diesel cycles from this number onward; null = all cycles (legacy). */
   diesel_obligation_from_cycle_number?: number | null;
+  /** Diesel cycles through this number inclusive; null = ongoing. */
+  diesel_obligation_to_cycle_number?: number | null;
   created_at: string;
 }
 
@@ -31,29 +38,35 @@ export function UnitsTable({ units }: { units: Unit[] }) {
   const router = useRouter();
   const [list, setList] = useState(units);
   const [editing, setEditing] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState<Unit | null>(null);
+  const [leavingGen, setLeavingGen] = useState<Unit | null>(null);
 
   useEffect(() => {
     setList(units);
   }, [units]);
 
-  async function toggleActive(unit: Unit) {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("units")
-      .update({ is_active: !unit.is_active })
-      .eq("id", unit.id);
-    if (error) {
-      toast.error(error.message);
+  async function handleActivate(unit: Unit) {
+    try {
+      await reactivateUnit(unit.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to activate");
       return;
     }
     setList((prev) =>
       prev.map((u) =>
-        u.id === unit.id ? { ...u, is_active: !u.is_active } : u
+        u.id === unit.id
+          ? {
+              ...u,
+              is_active: true,
+              diesel_participates: true,
+              diesel_obligation_to_cycle_number: null,
+              service_charge_obligation_end: null,
+            }
+          : u
       )
     );
-    toast.success(
-      unit.is_active ? "Unit deactivated" : "Unit activated"
-    );
+    toast.success("Unit activated");
+    router.refresh();
   }
 
   async function handleUpdate(
@@ -125,6 +138,14 @@ export function UnitsTable({ units }: { units: Unit[] }) {
             >
               <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                 {unit.flat_number}
+                {unit.diesel_obligation_to_cycle_number != null && (
+                  <span
+                    className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                    title="Generator obligation ended after this cycle"
+                  >
+                    Left after cycle {unit.diesel_obligation_to_cycle_number}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
                 {unit.owner_name}
@@ -137,7 +158,14 @@ export function UnitsTable({ units }: { units: Unit[] }) {
               </td>
               <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
                 {unit.diesel_participates ?? true ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">Yes</span>
+                  <button
+                    onClick={() => setLeavingGen(unit)}
+                    disabled={!unit.is_active}
+                    className="text-emerald-600 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 disabled:no-underline dark:text-emerald-400"
+                    title="End generator participation"
+                  >
+                    Yes
+                  </button>
                 ) : (
                   <span className="text-zinc-400">No</span>
                 )}
@@ -155,7 +183,9 @@ export function UnitsTable({ units }: { units: Unit[] }) {
               </td>
               <td className="px-4 py-3 text-right">
                 <button
-                  onClick={() => toggleActive(unit)}
+                  onClick={() =>
+                    unit.is_active ? setDeactivating(unit) : handleActivate(unit)
+                  }
                   className="mr-2 text-sm text-amber-600 hover:text-amber-700 dark:text-amber-400"
                 >
                   {unit.is_active ? "Deactivate" : "Activate"}
@@ -182,6 +212,268 @@ export function UnitsTable({ units }: { units: Unit[] }) {
           No units yet. Add your first unit.
         </div>
       )}
+      {leavingGen && (
+        <LeaveGeneratorModal
+          unit={leavingGen}
+          onClose={() => setLeavingGen(null)}
+          onDone={(lastCycle) => {
+            setList((prev) =>
+              prev.map((u) =>
+                u.id === leavingGen.id
+                  ? {
+                      ...u,
+                      diesel_participates: false,
+                      diesel_obligation_to_cycle_number: lastCycle,
+                    }
+                  : u
+              )
+            );
+            setLeavingGen(null);
+            router.refresh();
+          }}
+        />
+      )}
+      {deactivating && (
+        <DeactivateUnitModal
+          unit={deactivating}
+          onClose={() => setDeactivating(null)}
+          onDone={(result) => {
+            setList((prev) =>
+              prev.map((u) =>
+                u.id === deactivating.id
+                  ? {
+                      ...u,
+                      is_active: false,
+                      diesel_obligation_to_cycle_number: result.dieselLastCycle,
+                      service_charge_obligation_end: result.serviceChargeEndDate,
+                    }
+                  : u
+              )
+            );
+            setDeactivating(null);
+            router.refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function LeaveGeneratorModal({
+  unit,
+  onClose,
+  onDone,
+}: {
+  unit: Unit;
+  onClose: () => void;
+  onDone: (lastCycle: number | null) => void;
+}) {
+  const [openCycle, setOpenCycle] = useState<number | null>(null);
+  const [lastCycle, setLastCycle] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getCurrentOpenCycleNumber()
+      .then((n) => {
+        setOpenCycle(n);
+        setLastCycle(n != null ? String(n) : "");
+      })
+      .catch(() => {
+        setOpenCycle(null);
+      });
+  }, []);
+
+  async function handleConfirm() {
+    const trimmed = lastCycle.trim();
+    let parsed: number | null = null;
+    if (trimmed !== "") {
+      const n = parseInt(trimmed, 10);
+      if (!Number.isFinite(n) || n < 1) {
+        toast.error("Last cycle must be a positive integer");
+        return;
+      }
+      parsed = n;
+    }
+    setLoading(true);
+    try {
+      const res = await leaveGenerator(unit.id, { lastCycleNumber: parsed });
+      toast.success(
+        res.lastCycleNumber != null
+          ? `Generator participation ended after cycle ${res.lastCycleNumber}`
+          : "Generator participation ended"
+      );
+      onDone(res.lastCycleNumber);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to end participation");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-2 text-lg font-semibold">
+          End generator participation — {unit.flat_number}
+        </h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          All payments so far stay in the fund. The unit will only be billed
+          through the last cycle below.
+        </p>
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block font-medium">Last billable cycle</span>
+          <input
+            type="number"
+            min={1}
+            value={lastCycle}
+            onChange={(e) => setLastCycle(e.target.value)}
+            className="w-full rounded border px-3 py-2 text-sm"
+            placeholder={openCycle != null ? String(openCycle) : "Cycle number"}
+          />
+          <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+            {openCycle != null
+              ? `Current open cycle is #${openCycle}. Leave blank to stop immediately (no end-cap).`
+              : "No open cycle currently. Leave blank to stop immediately."}
+          </span>
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="rounded px-4 py-2 text-sm text-zinc-600 hover:text-zinc-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={loading}
+            className="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {loading ? "Ending..." : "End participation"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeactivateUnitModal({
+  unit,
+  onClose,
+  onDone,
+}: {
+  unit: Unit;
+  onClose: () => void;
+  onDone: (result: {
+    dieselLastCycle: number | null;
+    serviceChargeEndDate: string | null;
+  }) => void;
+}) {
+  const [openCycle, setOpenCycle] = useState<number | null>(null);
+  const [lastCycle, setLastCycle] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getCurrentOpenCycleNumber()
+      .then((n) => {
+        setOpenCycle(n);
+        setLastCycle(n != null ? String(n) : "");
+      })
+      .catch(() => {
+        setOpenCycle(null);
+      });
+  }, []);
+
+  async function handleConfirm() {
+    let parsedCycle: number | null = null;
+    const trimmed = lastCycle.trim();
+    if (trimmed !== "") {
+      const n = parseInt(trimmed, 10);
+      if (!Number.isFinite(n) || n < 1) {
+        toast.error("Last cycle must be a positive integer");
+        return;
+      }
+      parsedCycle = n;
+    }
+    const parsedEnd = endDate.trim() || null;
+    setLoading(true);
+    try {
+      const res = await deactivateUnit(unit.id, {
+        dieselLastCycle: parsedCycle,
+        serviceChargeEndDate: parsedEnd,
+      });
+      toast.success("Unit deactivated");
+      onDone(res);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to deactivate");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <h3 className="mb-2 text-lg font-semibold">
+          Deactivate {unit.flat_number}
+        </h3>
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+          Use when a resident leaves the estate. All past payments and
+          obligations stay on the books; billing stops after the cut-offs below.
+        </p>
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block font-medium">
+            Last billable diesel cycle
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={lastCycle}
+            onChange={(e) => setLastCycle(e.target.value)}
+            className="w-full rounded border px-3 py-2 text-sm"
+            placeholder={openCycle != null ? String(openCycle) : "Cycle number"}
+          />
+          <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+            {openCycle != null
+              ? `Current open cycle is #${openCycle}.`
+              : "No open cycle currently."}{" "}
+            Leave blank if unit has never been on the generator.
+          </span>
+        </label>
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block font-medium">
+            Service charge end date
+          </span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="w-full rounded border px-3 py-2 text-sm"
+          />
+          <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+            Obligations whose period ends after this date will not apply.
+          </span>
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="rounded px-4 py-2 text-sm text-zinc-600 hover:text-zinc-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={loading}
+            className="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {loading ? "Deactivating..." : "Deactivate"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -207,7 +499,9 @@ function EditUnitButton({
         | "email"
         | "diesel_participates"
         | "service_charge_obligation_start"
+        | "service_charge_obligation_end"
         | "diesel_obligation_from_cycle_number"
+        | "diesel_obligation_to_cycle_number"
       >
     >
   ) => void | Promise<void>;
@@ -247,7 +541,9 @@ function EditUnitForm({
         | "email"
         | "diesel_participates"
         | "service_charge_obligation_start"
+        | "service_charge_obligation_end"
         | "diesel_obligation_from_cycle_number"
+        | "diesel_obligation_to_cycle_number"
       >
     >
   ) => void | Promise<void>;
@@ -261,9 +557,17 @@ function EditUnitForm({
   const [svcStart, setSvcStart] = useState(
     unit.service_charge_obligation_start?.slice(0, 10) ?? ""
   );
+  const [svcEnd, setSvcEnd] = useState(
+    unit.service_charge_obligation_end?.slice(0, 10) ?? ""
+  );
   const [dieselFrom, setDieselFrom] = useState(
     unit.diesel_obligation_from_cycle_number != null
       ? String(unit.diesel_obligation_from_cycle_number)
+      : ""
+  );
+  const [dieselTo, setDieselTo] = useState(
+    unit.diesel_obligation_to_cycle_number != null
+      ? String(unit.diesel_obligation_to_cycle_number)
       : ""
   );
 
@@ -313,6 +617,16 @@ function EditUnitForm({
         />
       </label>
       <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="whitespace-nowrap">SC to</span>
+        <input
+          type="date"
+          value={svcEnd}
+          onChange={(e) => setSvcEnd(e.target.value)}
+          className="w-36 rounded border px-1 py-0.5 text-xs"
+          title="Service charge obligation end (blank = ongoing)"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
         <span className="whitespace-nowrap">Diesel from #</span>
         <input
           type="number"
@@ -324,16 +638,45 @@ function EditUnitForm({
           title="First diesel cycle this unit owes (blank = from cycle 1)"
         />
       </label>
+      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="whitespace-nowrap">Diesel to #</span>
+        <input
+          type="number"
+          min={1}
+          value={dieselTo}
+          onChange={(e) => setDieselTo(e.target.value)}
+          placeholder="ongoing"
+          className="w-16 rounded border px-1 py-0.5 text-xs"
+          title="Last diesel cycle this unit is liable for (blank = ongoing)"
+        />
+      </label>
       <button
         onClick={async () => {
-          let dieselCycle: number | null = null;
+          let dieselFromCycle: number | null = null;
           if (dieselFrom.trim() !== "") {
             const n = parseInt(dieselFrom, 10);
             if (!Number.isFinite(n) || n < 1) {
-              toast.error("Diesel cycle # must be a positive integer");
+              toast.error("Diesel from # must be a positive integer");
               return;
             }
-            dieselCycle = n;
+            dieselFromCycle = n;
+          }
+          let dieselToCycle: number | null = null;
+          if (dieselTo.trim() !== "") {
+            const n = parseInt(dieselTo, 10);
+            if (!Number.isFinite(n) || n < 1) {
+              toast.error("Diesel to # must be a positive integer");
+              return;
+            }
+            dieselToCycle = n;
+          }
+          if (
+            dieselFromCycle != null &&
+            dieselToCycle != null &&
+            dieselToCycle < dieselFromCycle
+          ) {
+            toast.error("Diesel 'to' cycle cannot be before 'from' cycle");
+            return;
           }
           await onSave({
             flat_number: flat,
@@ -342,7 +685,9 @@ function EditUnitForm({
             email: email || null,
             diesel_participates: diesel,
             service_charge_obligation_start: svcStart.trim() || null,
-            diesel_obligation_from_cycle_number: dieselCycle,
+            service_charge_obligation_end: svcEnd.trim() || null,
+            diesel_obligation_from_cycle_number: dieselFromCycle,
+            diesel_obligation_to_cycle_number: dieselToCycle,
           });
         }}
         className="text-sm text-emerald-600 hover:text-emerald-700"

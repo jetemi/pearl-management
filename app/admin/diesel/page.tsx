@@ -10,13 +10,16 @@ export default async function DieselPage() {
 
   const { data: units } = await supabase
     .from("units")
-    .select("id, flat_number, owner_name, diesel_participates")
-    .eq("is_active", true)
+    .select(
+      "id, flat_number, owner_name, diesel_participates, diesel_obligation_to_cycle_number, is_active"
+    )
     .order("flat_number");
 
-  const participatingUnits =
-    units?.filter((u) => u.diesel_participates ?? true) ?? [];
-  const participatingIds = participatingUnits.map((u) => u.id);
+  const activeUnits = (units ?? []).filter((u) => u.is_active !== false);
+  // Units currently on the generator (for the per-unit owing/ahead table).
+  const participatingUnits = activeUnits.filter(
+    (u) => u.diesel_participates ?? true
+  );
 
   const { data: currentCycle } = await supabase
     .from("diesel_cycles")
@@ -36,7 +39,7 @@ export default async function DieselPage() {
       const balance = await getUnitDieselBalance(
         supabase,
         unit.id,
-        true
+        unit.diesel_participates ?? true
       );
       return {
         unit: {
@@ -51,8 +54,7 @@ export default async function DieselPage() {
 
   const poolTotals = await getDieselPoolTotals(
     supabase,
-    currentCycle?.id ?? null,
-    participatingIds
+    currentCycle?.id ?? null
   );
 
   const { data: recentExpenditures } = await supabase
@@ -72,7 +74,7 @@ export default async function DieselPage() {
         unitBalances={unitBalances}
         poolTotals={poolTotals}
         recentExpenditures={recentExpenditures ?? []}
-        activeUnitCount={units?.length ?? 0}
+        activeUnitCount={activeUnits.length}
       />
     </div>
   );

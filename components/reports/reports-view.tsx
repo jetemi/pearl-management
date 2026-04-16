@@ -13,6 +13,10 @@ interface DieselReportRow {
   owedCycles: number;
   aheadCycles: number;
   dieselNotApplicable: boolean;
+  /** Last cycle the unit was obligated for (set when they gracefully left). */
+  leftAfterCycle?: number | null;
+  /** Former resident (is_active = false). */
+  isFormerResident?: boolean;
 }
 
 interface ServiceChargePeriodReport {
@@ -57,13 +61,17 @@ export function ReportsView({
       totalExpected: r.dieselNotApplicable ? "—" : r.totalExpected,
       totalPaid: r.dieselNotApplicable ? "—" : r.totalPaid,
       balance: r.dieselNotApplicable ? "—" : r.balance,
-      status: r.dieselNotApplicable
-        ? "Off generator"
-        : r.owedCycles > 0
-          ? `Owes ${r.owedCycles} cycle(s)`
-          : r.aheadCycles > 0
-            ? `Ahead ${r.aheadCycles} cycle(s)`
-            : "Paid up",
+      status: r.isFormerResident
+        ? `Former resident${r.leftAfterCycle != null ? ` (left after cycle ${r.leftAfterCycle})` : ""}`
+        : r.leftAfterCycle != null
+          ? `Left generator after cycle ${r.leftAfterCycle}`
+          : r.dieselNotApplicable
+            ? "Off generator"
+            : r.owedCycles > 0
+              ? `Owes ${r.owedCycles} cycle(s)`
+              : r.aheadCycles > 0
+                ? `Ahead ${r.aheadCycles} cycle(s)`
+                : "Paid up",
     }));
     const csv = exportToCSV(rows, [
       { key: "flat", header: "Flat" },
@@ -222,6 +230,16 @@ export function ReportsView({
                 <tr key={r.flat_number}>
                   <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     {r.flat_number}
+                    {r.isFormerResident && (
+                      <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                        Former resident
+                      </span>
+                    )}
+                    {!r.isFormerResident && r.leftAfterCycle != null && (
+                      <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                        Left after cycle {r.leftAfterCycle}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
                     {r.owner_name}
@@ -250,7 +268,13 @@ export function ReportsView({
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {r.dieselNotApplicable ? (
+                    {r.isFormerResident ? (
+                      <span className="text-zinc-500">Former resident</span>
+                    ) : r.leftAfterCycle != null ? (
+                      <span className="text-zinc-500">
+                        Left generator after cycle {r.leftAfterCycle}
+                      </span>
+                    ) : r.dieselNotApplicable ? (
                       <span className="text-zinc-500">Off generator</span>
                     ) : r.owedCycles > 0 ? (
                       <span className="text-amber-600">Owes {r.owedCycles} cycle(s)</span>

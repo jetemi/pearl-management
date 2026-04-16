@@ -53,6 +53,10 @@ export interface DieselBalance {
   paidCurrentCycle: number;
   /** True when unit is not on the generator — diesel section should show N/A. */
   dieselNotApplicable?: boolean;
+  /** Last cycle number the unit is obligated for (null = ongoing). */
+  obligationToCycleNumber?: number | null;
+  /** True when the unit's obligation has ended (to-cycle is set and < current open cycle, or all applicable cycles closed). */
+  obligationEnded?: boolean;
   /** Per-cycle breakdown showing how payments are allocated oldest-first. */
   perCycleBreakdown: CycleAllocation[];
 }
@@ -119,26 +123,54 @@ type DieselCycleRow = {
   closed_at: string | null;
 };
 
-/** Cycles this unit is liable for (NULL min = all cycles, legacy). */
+/** Cycles this unit is liable for (NULL from = all cycles onward, NULL to = ongoing). */
 export function filterDieselCyclesForUnit(
   allCycles: DieselCycleRow[],
-  dieselObligationFromCycleNumber: number | null | undefined
+  dieselObligationFromCycleNumber: number | null | undefined,
+  dieselObligationToCycleNumber: number | null | undefined = null
 ): DieselCycleRow[] {
-  if (dieselObligationFromCycleNumber == null) return allCycles;
-  return allCycles.filter(
-    (c) => c.cycle_number >= dieselObligationFromCycleNumber
-  );
+  return allCycles.filter((c) => {
+    if (
+      dieselObligationFromCycleNumber != null &&
+      c.cycle_number < dieselObligationFromCycleNumber
+    ) {
+      return false;
+    }
+    if (
+      dieselObligationToCycleNumber != null &&
+      c.cycle_number > dieselObligationToCycleNumber
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
+/**
+ * Pool totals always count ALL historical contributions regardless of current
+ * participation (a unit leaving the generator does NOT retroactively erase
+ * their past payments from the pool). Per-unit obligation windows only affect
+ * which cycles their money gets allocated to via the waterfall.
+ */
 export async function getDieselPoolTotals(
   supabase: SupabaseClient,
-  openCycleId: string | null,
-  participatingUnitIds: string[]
+  openCycleId: string | null
 ): Promise<DieselPoolTotals> {
-  const lifetimeCollected = await sumContributionsForUnits(
-    supabase,
-    participatingUnitIds
-  );
+  const { data: allContribsRows } = await supabase
+    .from("diesel_contributions")
+    .select("unit_id, amount_paid");
+
+  const contribsByUnit = new Map<string, number>();
+  let lifetimeCollected = 0;
+  for (const row of allContribsRows ?? []) {
+    const amt = Number(row.amount_paid);
+    lifetimeCollected += amt;
+    contribsByUnit.set(
+      row.unit_id,
+      (contribsByUnit.get(row.unit_id) ?? 0) + amt
+    );
+  }
+
   const lifetimePurchases = await sumExpendituresAll(supabase);
   const netLifetime = lifetimeCollected - lifetimePurchases;
 
@@ -153,37 +185,51 @@ export async function getDieselPoolTotals(
       .select("id, cycle_number, amount_per_unit, closed_at")
       .order("cycle_number", { ascending: true });
 
-    if (allCycles && participatingUnitIds.length > 0) {
+    const contributingUnitIds = Array.from(contribsByUnit.keys());
+    if (allCycles && contributingUnitIds.length > 0) {
       const { data: unitRows } = await supabase
         .from("units")
-        .select("id, diesel_obligation_from_cycle_number")
-        .in("id", participatingUnitIds);
+        .select(
+          "id, diesel_participates, diesel_obligation_from_cycle_number, diesel_obligation_to_cycle_number"
+        )
+        .in("id", contributingUnitIds);
 
-      const minCycleByUnit = new Map<string, number | null>();
-      for (const u of unitRows ?? []) {
-        minCycleByUnit.set(
-          u.id,
-          u.diesel_obligation_from_cycle_number ?? null
-        );
-      }
-
-      const { data: allContribs } = await supabase
+      // Per-unit max contributed cycle number, for legacy off-gen backfill.
+      const { data: contribCycles } = await supabase
         .from("diesel_contributions")
-        .select("unit_id, amount_paid")
-        .in("unit_id", participatingUnitIds);
-
-      const contribsByUnit = new Map<string, number>();
-      for (const row of allContribs ?? []) {
-        contribsByUnit.set(
-          row.unit_id,
-          (contribsByUnit.get(row.unit_id) ?? 0) + Number(row.amount_paid)
-        );
+        .select("unit_id, cycle_id")
+        .in("unit_id", contributingUnitIds);
+      const cycleNumberById = new Map(
+        allCycles.map((c) => [c.id, c.cycle_number] as const)
+      );
+      const maxCycleByUnit = new Map<string, number>();
+      for (const row of contribCycles ?? []) {
+        const n = cycleNumberById.get(row.cycle_id);
+        if (n == null) continue;
+        const cur = maxCycleByUnit.get(row.unit_id);
+        if (cur == null || n > cur) maxCycleByUnit.set(row.unit_id, n);
       }
 
-      for (const unitId of participatingUnitIds) {
+      const windowByUnit = new Map<
+        string,
+        { from: number | null; to: number | null }
+      >();
+      for (const u of unitRows ?? []) {
+        const participates = u.diesel_participates ?? true;
+        let to = u.diesel_obligation_to_cycle_number ?? null;
+        if (!participates && to == null) {
+          to = maxCycleByUnit.get(u.id) ?? null;
+        }
+        windowByUnit.set(u.id, {
+          from: u.diesel_obligation_from_cycle_number ?? null,
+          to,
+        });
+      }
+
+      for (const unitId of contributingUnitIds) {
         const unitTotal = contribsByUnit.get(unitId) ?? 0;
-        const minN = minCycleByUnit.get(unitId) ?? null;
-        const applicable = filterDieselCyclesForUnit(allCycles, minN);
+        const w = windowByUnit.get(unitId) ?? { from: null, to: null };
+        const applicable = filterDieselCyclesForUnit(allCycles, w.from, w.to);
         const breakdown = allocatePaymentsToCycles(applicable, unitTotal);
         const openEntry = breakdown.find((e) => e.isOpen);
         collectedThisCycle += openEntry?.allocated ?? 0;
@@ -209,23 +255,11 @@ export async function getUnitDieselBalance(
   unitId: string,
   dieselParticipates: boolean = true
 ): Promise<DieselBalance> {
-  if (!dieselParticipates) {
-    return {
-      totalExpected: 0,
-      totalPaid: 0,
-      balance: 0,
-      owedCycles: 0,
-      aheadCycles: 0,
-      amountPerUnit: 0,
-      paidCurrentCycle: 0,
-      dieselNotApplicable: true,
-      perCycleBreakdown: [],
-    };
-  }
-
   const { data: unitRow } = await supabase
     .from("units")
-    .select("diesel_obligation_from_cycle_number")
+    .select(
+      "diesel_obligation_from_cycle_number, diesel_obligation_to_cycle_number"
+    )
     .eq("id", unitId)
     .single();
 
@@ -240,19 +274,59 @@ export async function getUnitDieselBalance(
     .eq("unit_id", unitId);
 
   const allCycles = cycles ?? [];
+  const fromCycle = unitRow?.diesel_obligation_from_cycle_number ?? null;
+  let toCycle = unitRow?.diesel_obligation_to_cycle_number ?? null;
+
+  const totalPaidAll = (contributions ?? []).reduce(
+    (sum, c) => sum + Number(c.amount_paid),
+    0
+  );
+
+  // Legacy units that are off the generator but pre-date the end-window column:
+  // cap their obligation at the latest cycle they actually contributed to so
+  // they don't appear retroactively owing for future cycles they never opted into.
+  if (!dieselParticipates && toCycle == null && (contributions ?? []).length > 0) {
+    const cycleNumberById = new Map(
+      allCycles.map((c) => [c.id, c.cycle_number] as const)
+    );
+    let maxContributedCycle: number | null = null;
+    for (const c of contributions ?? []) {
+      const n = cycleNumberById.get(c.cycle_id);
+      if (n != null && (maxContributedCycle == null || n > maxContributedCycle)) {
+        maxContributedCycle = n;
+      }
+    }
+    toCycle = maxContributedCycle;
+  }
+
   const applicableCycles = filterDieselCyclesForUnit(
     allCycles,
-    unitRow?.diesel_obligation_from_cycle_number ?? null
+    fromCycle,
+    toCycle
   );
+
+  // Unit is not on the generator at all AND has no contribution history — nothing to show.
+  if (!dieselParticipates && totalPaidAll === 0 && toCycle == null) {
+    return {
+      totalExpected: 0,
+      totalPaid: 0,
+      balance: 0,
+      owedCycles: 0,
+      aheadCycles: 0,
+      amountPerUnit: 0,
+      paidCurrentCycle: 0,
+      dieselNotApplicable: true,
+      obligationToCycleNumber: null,
+      obligationEnded: false,
+      perCycleBreakdown: [],
+    };
+  }
 
   const totalExpected = applicableCycles.reduce(
     (sum, c) => sum + Number(c.amount_per_unit),
     0
   );
-  const totalPaid = (contributions ?? []).reduce(
-    (sum, c) => sum + Number(c.amount_paid),
-    0
-  );
+  const totalPaid = totalPaidAll;
   const balance = totalPaid - totalExpected;
 
   const openCycle = applicableCycles.find((c) => c.closed_at == null);
@@ -279,6 +353,10 @@ export async function getUnitDieselBalance(
     }
   }
 
+  // Obligation has ended when an upper bound is set and no applicable cycle is still open.
+  const obligationEnded =
+    toCycle != null && applicableCycles.every((c) => c.closed_at != null);
+
   return {
     totalExpected,
     totalPaid,
@@ -287,6 +365,9 @@ export async function getUnitDieselBalance(
     aheadCycles,
     amountPerUnit,
     paidCurrentCycle,
+    obligationToCycleNumber: toCycle,
+    obligationEnded,
+    dieselNotApplicable: !dieselParticipates && totalPaid === 0,
     perCycleBreakdown,
   };
 }
@@ -318,13 +399,19 @@ export interface ServiceChargePeriodStatus {
   paymentDate: string | null;
 }
 
-/** Whether a levy row applies given the unit's first liability date (if set). */
+/** Whether a levy row applies given the unit's liability window (start inclusive, end inclusive on period_end). */
 export function isServiceChargeObligationApplicable(
-  obligation: { period_start: string },
-  unitObligationStart: string | null | undefined
+  obligation: { period_start: string; period_end: string },
+  unitObligationStart: string | null | undefined,
+  unitObligationEnd: string | null | undefined = null
 ): boolean {
-  if (!unitObligationStart) return true;
-  return obligation.period_start >= unitObligationStart;
+  if (unitObligationStart && obligation.period_start < unitObligationStart) {
+    return false;
+  }
+  if (unitObligationEnd && obligation.period_end > unitObligationEnd) {
+    return false;
+  }
+  return true;
 }
 
 export async function getUnitServiceChargeStatus(
@@ -333,11 +420,12 @@ export async function getUnitServiceChargeStatus(
 ): Promise<ServiceChargePeriodStatus[]> {
   const { data: unitRow } = await supabase
     .from("units")
-    .select("service_charge_obligation_start")
+    .select("service_charge_obligation_start, service_charge_obligation_end")
     .eq("id", unitId)
     .single();
 
   const unitStart = unitRow?.service_charge_obligation_start ?? null;
+  const unitEnd = unitRow?.service_charge_obligation_end ?? null;
 
   const { data: obligations } = await supabase
     .from("service_charge_obligations")
@@ -374,7 +462,7 @@ export async function getUnitServiceChargeStatus(
     const expected = Number(row.amount);
     const rec = recordedByObligation.get(row.id);
     const amountRecorded = rec?.sum ?? 0;
-    const applies = isServiceChargeObligationApplicable(row, unitStart);
+    const applies = isServiceChargeObligationApplicable(row, unitStart, unitEnd);
     const periodStart = row.period_start;
     const periodEnd = row.period_end;
 

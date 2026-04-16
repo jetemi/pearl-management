@@ -10,7 +10,12 @@ import { exportToCSV } from "@/lib/utils";
 import { sendServiceChargeOverdueReminder } from "@/lib/actions/email";
 
 interface UnitStatus {
-  unit: { id: string; flat_number: string; owner_name: string };
+  unit: {
+    id: string;
+    flat_number: string;
+    owner_name: string;
+    isFormerResident?: boolean;
+  };
   status: ServiceChargePeriodStatus[];
 }
 
@@ -272,6 +277,11 @@ export function ServiceChargeView({
                         <tr key={s.periodId}>
                           <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                             {unit.flat_number}
+                            {unit.isFormerResident && (
+                              <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                Former resident
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
                             {unit.owner_name}

@@ -10,11 +10,34 @@ import { startOfMonth, format } from "date-fns";
 export default async function ReportsPage() {
   const supabase = await createClient();
 
-  const { data: units } = await supabase
+  // Include inactive units (former residents) whose contributions are still on the books.
+  const { data: unitsAll } = await supabase
     .from("units")
-    .select("id, flat_number, owner_name, diesel_participates")
-    .eq("is_active", true)
+    .select(
+      "id, flat_number, owner_name, diesel_participates, diesel_obligation_to_cycle_number, is_active"
+    )
     .order("flat_number");
+
+  const units = (unitsAll ?? []).filter((u) => u.is_active !== false);
+
+  // Former residents (inactive) who still have historical diesel contributions in the pool.
+  const inactiveUnits = (unitsAll ?? []).filter((u) => u.is_active === false);
+  let formerUnits: typeof inactiveUnits = [];
+  if (inactiveUnits.length > 0) {
+    const { data: inactiveContribs } = await supabase
+      .from("diesel_contributions")
+      .select("unit_id")
+      .in(
+        "unit_id",
+        inactiveUnits.map((u) => u.id)
+      );
+    const contributedIds = new Set(
+      (inactiveContribs ?? []).map((r) => r.unit_id)
+    );
+    formerUnits = inactiveUnits.filter((u) => contributedIds.has(u.id));
+  }
+
+  const unitsForReport = [...units, ...formerUnits];
 
   const { data: openCycle } = await supabase
     .from("diesel_cycles")
@@ -22,15 +45,9 @@ export default async function ReportsPage() {
     .is("closed_at", null)
     .maybeSingle();
 
-  const participatingIds =
-    units
-      ?.filter((u) => u.diesel_participates ?? true)
-      .map((u) => u.id) ?? [];
-
   const dieselPool = await getDieselPoolTotals(
     supabase,
-    openCycle?.id ?? null,
-    participatingIds
+    openCycle?.id ?? null
   );
 
   const { data: dieselCycles } = await supabase
@@ -53,7 +70,7 @@ export default async function ReportsPage() {
     .select("service_id, period_month, status");
 
   const dieselReport = await Promise.all(
-    (units ?? []).map(async (unit) => {
+    unitsForReport.map(async (unit) => {
       const onGen = unit.diesel_participates ?? true;
       const balance = await getUnitDieselBalance(supabase, unit.id, onGen);
       return {
@@ -67,6 +84,8 @@ export default async function ReportsPage() {
         owedCycles: balance.owedCycles,
         aheadCycles: balance.aheadCycles,
         dieselNotApplicable: balance.dieselNotApplicable ?? false,
+        leftAfterCycle: balance.obligationToCycleNumber ?? null,
+        isFormerResident: unit.is_active === false,
       };
     })
   );
@@ -74,7 +93,7 @@ export default async function ReportsPage() {
   const serviceChargeReport = await Promise.all(
     (serviceChargePeriods ?? []).map(async (period) => {
       const unitStatuses = await Promise.all(
-        (units ?? []).map(async (unit) => {
+        units.map(async (unit) => {
           const status = await getUnitServiceChargeStatus(supabase, unit.id);
           const s = status.find(
             (sp) => sp.templateId === period.id && sp.obligationApplies

@@ -259,6 +259,8 @@ function DieselStatus({
     paidCurrentCycle: number;
     totalPaid: number;
     dieselNotApplicable?: boolean;
+    obligationToCycleNumber?: number | null;
+    obligationEnded?: boolean;
   };
 }) {
   if (balance.dieselNotApplicable) {
@@ -267,6 +269,27 @@ function DieselStatus({
         <p className="text-sm text-zinc-700 dark:text-zinc-300">
           This unit is <strong>not</strong> on the diesel generator, so there
           is no diesel contribution obligation here.
+        </p>
+      </div>
+    );
+  }
+
+  // Obligation gracefully ended: still show lifetime contribution so the resident
+  // can see their history. Owed amount (if any) is handled by the normal branches below.
+  if (balance.obligationEnded && balance.balance >= 0) {
+    return (
+      <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+        <p className="font-medium text-zinc-800 dark:text-zinc-200">
+          No longer on the generator
+        </p>
+        {balance.obligationToCycleNumber != null && (
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Last contribution cycle: #{balance.obligationToCycleNumber}. Thank
+            you for your contributions.
+          </p>
+        )}
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          Lifetime contributed: {formatCurrency(balance.totalPaid)}
         </p>
       </div>
     );

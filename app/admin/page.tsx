@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { getCurrentResident } from "@/lib/auth";
 import { isFacilityManager } from "@/lib/auth-roles";
 import {
+  getDieselPoolTotals,
   getUnitDieselBalance,
-  sumContributionsForCycle,
 } from "@/lib/utils";
 
 export default async function AdminOverviewPage() {
@@ -35,7 +35,6 @@ export default async function AdminOverviewPage() {
 
   const participating =
     units?.filter((u) => u.diesel_participates ?? true) ?? [];
-  const participatingIds = participating.map((u) => u.id);
 
   let totalCollectedThisCycle = 0;
   let totalOutstanding = 0;
@@ -43,11 +42,10 @@ export default async function AdminOverviewPage() {
   let unpaidCount = 0;
 
   if (currentCycle && participating.length > 0) {
-    totalCollectedThisCycle = await sumContributionsForCycle(
-      supabase,
-      currentCycle.id,
-      participatingIds
-    );
+    // Pool-level collected-this-cycle counts all historical contributions waterfall-allocated
+    // to the open cycle, so it never drops when a unit leaves the generator.
+    const pool = await getDieselPoolTotals(supabase, currentCycle.id);
+    totalCollectedThisCycle = pool.collectedThisCycle;
 
     for (const unit of participating) {
       const balance = await getUnitDieselBalance(supabase, unit.id, true);
