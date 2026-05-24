@@ -82,3 +82,28 @@ export async function recordQuizAttempt(input: {
   if (error) return { success: false as const, error: error.message };
   return { success: true as const, score, total };
 }
+
+export async function setExamDate(examDate: string) {
+  const user = await requireCbapUser();
+  const supabase = await createClient();
+  const { error } = await supabase.from("cbap_settings").upsert(
+    { user_id: user.id, exam_date: examDate, updated_at: new Date().toISOString() },
+    { onConflict: "user_id" }
+  );
+  if (error) return { success: false as const, error: error.message };
+  revalidatePath("/cbap");
+  revalidatePath("/cbap/plan");
+  return { success: true as const };
+}
+
+export async function togglePlanItem(taskKey: string, done: boolean) {
+  const user = await requireCbapUser();
+  const supabase = await createClient();
+  const { error } = await supabase.from("cbap_plan_progress").upsert(
+    { user_id: user.id, task_key: taskKey, done, done_at: done ? new Date().toISOString() : null },
+    { onConflict: "user_id,task_key" }
+  );
+  if (error) return { success: false as const, error: error.message };
+  revalidatePath("/cbap/plan");
+  return { success: true as const };
+}
