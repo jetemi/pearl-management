@@ -10,11 +10,16 @@ import type {
 import { knowledgeAreas } from "./knowledge-areas";
 import { tasks } from "./tasks";
 import { techniques } from "./techniques";
+import { flashcards } from "./flashcards";
 
-export { knowledgeAreas, tasks, techniques };
+export { knowledgeAreas, tasks, techniques, flashcards };
 export type { KnowledgeArea, KnowledgeAreaId, Task, Technique, Flashcard, Question, CaseStudy };
 
-// flashcards/questions/caseStudies are added in later tasks (Phases 3 & 4).
+// questions/caseStudies are added in Phase 4.
+
+export function getFlashcardsByKa(kaId: KnowledgeAreaId): Flashcard[] {
+  return flashcards.filter((f) => f.kaId === kaId);
+}
 
 export function getKnowledgeArea(id: KnowledgeAreaId): KnowledgeArea | undefined {
   return knowledgeAreas.find((k) => k.id === id);
