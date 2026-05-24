@@ -20,6 +20,11 @@ A zero-cost estate management app for small residential estates (20–50 units).
 In Supabase Dashboard → SQL Editor, run the migration files in order:
 1. `supabase/migrations/001_initial_schema.sql`
 2. `supabase/migrations/002_get_user_by_email.sql`
+3. `supabase/migrations/003_chairman_role_policy.sql`
+4. `supabase/migrations/004_phase2_schema.sql`
+5. `supabase/migrations/005_phase4_resident_requests.sql`
+6. `supabase/migrations/006_residents_phone_fm_contacts.sql`
+7. `supabase/migrations/007_diesel_generator_accounting.sql`
 
 Or with Supabase CLI:
 
@@ -51,6 +56,19 @@ Edit `.env.local` and add your Supabase URL and anon key.
 **Bulk emails (new cycle, notices):**
 
 Add `RESEND_API_KEY=re_xxxx` to `.env.local`. The app uses this for bulk emails to residents.
+
+**Optional branding (used in WhatsApp/email messages):**
+
+- `NEXT_PUBLIC_ESTATE_NAME` — e.g. "Sunshine Estate"
+- `NEXT_PUBLIC_BANK_DETAILS` — e.g. "GTBank 0123456789 (Estate Account)"
+
+**Phase 4 — resident requests & facility manager:**
+
+- `NEXT_PUBLIC_APP_URL` — canonical site URL for email links and WhatsApp text (e.g. `https://your-app.vercel.app`). Falls back to `VERCEL_URL` on Vercel or `http://localhost:3000` locally.
+- Facility manager **emails** come from every `auth.users` account whose `residents.role` is `facility_manager` (RPC `get_facility_manager_emails()`). Each manager gets their own copy of the notification email.
+- Facility manager **WhatsApp numbers** come from `residents.phone`, or the linked unit’s `units.phone` if the resident phone is empty (RPC `get_facility_manager_phones()`). Set phones under **Admin → Residents** (chairman). Multiple managers get one green button each when numbers differ.
+
+In Supabase → **Authentication** → **URL configuration**, allow redirect URLs that include query strings (e.g. `http://localhost:3000/auth/callback**`) so magic links preserve the `next` parameter.
 
 ### 5. Install and run
 
@@ -96,11 +114,13 @@ ON CONFLICT (id) DO UPDATE SET role = 'treasurer', unit_id = EXCLUDED.unit_id;
 
 If you didn't use Supabase CLI, run the migration SQL in Supabase Dashboard → SQL Editor against your production project.
 
-## Features (Phase 1)
+## Features
 
 - **Auth:** Magic link login (no passwords)
-- **Admin:** Unit registry (add/edit/deactivate), diesel fund (cycles, payments, balance)
-- **Resident portal:** View own diesel status and payment history
+- **Admin:** Unit registry (add/edit/deactivate, bulk CSV import, diesel generator on/off per unit), diesel fund (cycles, payments, estate cash pool vs purchases, balance, WhatsApp reminder), service charge, facility tracker, reports, notices, resident requests queue
+- **Resident portal:** View own diesel status and payment history; submit facility requests (email + WhatsApp share to FM)
+- **Phase 3:** WhatsApp message generator, email reminders (new cycle, overdue, notice broadcast), print-friendly reports, mobile-responsive nav
+- **Phase 4:** Resident requests to facility manager, Resend notification emails, WhatsApp deep link, `facility_manager` role with filtered admin nav
 
 ## Project structure
 
