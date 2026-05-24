@@ -11,14 +11,22 @@ import { knowledgeAreas } from "./knowledge-areas";
 import { tasks } from "./tasks";
 import { techniques } from "./techniques";
 import { flashcards } from "./flashcards";
+import { questions } from "./questions";
+import { caseStudies } from "./case-studies";
 
-export { knowledgeAreas, tasks, techniques, flashcards };
+export { knowledgeAreas, tasks, techniques, flashcards, questions, caseStudies };
 export type { KnowledgeArea, KnowledgeAreaId, Task, Technique, Flashcard, Question, CaseStudy };
-
-// questions/caseStudies are added in Phase 4.
 
 export function getFlashcardsByKa(kaId: KnowledgeAreaId): Flashcard[] {
   return flashcards.filter((f) => f.kaId === kaId);
+}
+
+export function getQuestionsByKa(kaId: KnowledgeAreaId): Question[] {
+  return questions.filter((q) => q.kaId === kaId);
+}
+
+export function getCaseStudyById(id: string): CaseStudy | undefined {
+  return caseStudies.find((c) => c.id === id);
 }
 
 export function getKnowledgeArea(id: KnowledgeAreaId): KnowledgeArea | undefined {

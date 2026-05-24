@@ -56,3 +56,29 @@ export async function upsertFlashcardReview(cardId: string, grade: number) {
   if (error) return { success: false as const, error: error.message };
   return { success: true as const, dueDate: next.dueDate };
 }
+
+type QuizDetail = { questionId: string; chosenIndex: number; correct: boolean };
+
+export async function recordQuizAttempt(input: {
+  mode: "practice" | "mock";
+  kaId: string | null;
+  durationSeconds: number;
+  details: QuizDetail[];
+}) {
+  const user = await requireCbapUser();
+  const supabase = await createClient();
+  const total = input.details.length;
+  const score = input.details.filter((d) => d.correct).length;
+
+  const { error } = await supabase.from("cbap_quiz_attempts").insert({
+    user_id: user.id,
+    mode: input.mode,
+    ka_id: input.kaId,
+    score,
+    total,
+    duration_seconds: input.durationSeconds,
+    details: input.details,
+  });
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const, score, total };
+}
