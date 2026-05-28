@@ -42,6 +42,13 @@ export default async function MyLayout({
                 Admin
               </Link>
             )}
+            {/* CBAP (detachable) — remove this one link to unlink the study app */}
+            <Link
+              href="/cbap"
+              className="text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            >
+              CBAP
+            </Link>
             <form action="/auth/signout" method="post">
               <button
                 type="submit"

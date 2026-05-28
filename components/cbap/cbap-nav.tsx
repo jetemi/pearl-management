@@ -17,6 +17,12 @@ export function CbapNav() {
   return (
     <nav className="flex flex-row gap-1 overflow-x-auto border-b border-black/10 bg-black/[.03] p-2 md:min-h-screen md:w-56 md:flex-col md:border-b-0 md:border-r dark:border-white/15 dark:bg-white/[.04]">
       <div className="hidden px-2 py-3 text-sm font-semibold md:block">CBAP Prep</div>
+      <Link
+        href="/my"
+        className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-black/50 hover:bg-black/5 hover:text-black/80 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white/80"
+      >
+        ← Estate App
+      </Link>
       {LINKS.map((l) => {
         const active = l.href === "/cbap" ? pathname === l.href : pathname.startsWith(l.href);
         return (
