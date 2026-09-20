@@ -11,7 +11,7 @@ import { knowledgeAreas } from "./knowledge-areas";
 import { tasks } from "./tasks";
 import { techniques } from "./techniques";
 import { flashcards } from "./flashcards";
-import { questions } from "./questions";
+import { questions } from "./questions/index";
 import { caseStudies } from "./case-studies";
 
 export { knowledgeAreas, tasks, techniques, flashcards, questions, caseStudies };
