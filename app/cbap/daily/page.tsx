@@ -25,7 +25,7 @@ export default async function DailyPage() {
 
   const [{ data: settings }, { data: stateRows }, { data: todayLog }, { data: recentLogs }] =
     await Promise.all([
-      supabase.from("cbap_settings").select("daily_target, exam_date").eq("user_id", user.id).maybeSingle(),
+      supabase.from("cbap_settings").select("daily_question_goal, exam_date").eq("user_id", user.id).maybeSingle(),
       supabase
         .from("cbap_question_state")
         .select("question_id, ease, interval_days, repetitions, due_date, times_seen, times_correct")
@@ -44,7 +44,7 @@ export default async function DailyPage() {
         .limit(400),
     ]);
 
-  const target = todayLog?.target ?? settings?.daily_target ?? DEFAULT_DAILY_TARGET;
+  const target = todayLog?.target ?? settings?.daily_question_goal ?? DEFAULT_DAILY_TARGET;
 
   const states: QuestionState[] = (stateRows ?? []).map((r) => ({
     questionId: r.question_id,

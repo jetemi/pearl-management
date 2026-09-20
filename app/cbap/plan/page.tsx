@@ -11,7 +11,7 @@ export default async function PlanPage() {
   const user = await requireCbapUser();
   const supabase = await createClient();
 
-  const { data: settings } = await supabase.from("cbap_settings").select("exam_date, daily_target").eq("user_id", user.id).maybeSingle();
+  const { data: settings } = await supabase.from("cbap_settings").select("exam_date, daily_question_goal").eq("user_id", user.id).maybeSingle();
   const { data: prog } = await supabase.from("cbap_plan_progress").select("task_key, done").eq("user_id", user.id);
   const doneSet = new Set((prog ?? []).filter((p) => p.done).map((p) => p.task_key));
 
@@ -24,7 +24,7 @@ export default async function PlanPage() {
       <p className="mt-1 text-sm opacity-70">12-week intensive track. Set your exam date to anchor the schedule.</p>
       <div className="mt-4 space-y-3 rounded-lg border border-black/10 p-4 dark:border-white/15">
         <ExamDateForm current={examDate} />
-        <DailyTargetForm current={settings?.daily_target ?? DEFAULT_DAILY_TARGET} bankSize={questions.length} />
+        <DailyTargetForm current={settings?.daily_question_goal ?? DEFAULT_DAILY_TARGET} bankSize={questions.length} />
       </div>
       <div className="mt-6 space-y-4">
         {weeks.map((w) => (

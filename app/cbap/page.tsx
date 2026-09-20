@@ -36,7 +36,7 @@ export default async function CbapDashboardPage() {
     { data: todayLog },
     { data: recentLogs },
   ] = await Promise.all([
-    supabase.from("cbap_settings").select("exam_date, daily_target").eq("user_id", user.id).maybeSingle(),
+    supabase.from("cbap_settings").select("exam_date, daily_question_goal").eq("user_id", user.id).maybeSingle(),
     supabase.from("cbap_item_progress").select("item_id").eq("user_id", user.id).eq("reviewed", true),
     supabase.from("cbap_flashcard_state").select("card_id, due_date").eq("user_id", user.id),
     supabase.from("cbap_quiz_attempts").select("score, total, mode, created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5),
@@ -53,7 +53,7 @@ export default async function CbapDashboardPage() {
   }).length;
 
   const examDate = settings?.exam_date ?? null;
-  const target = todayLog?.target ?? settings?.daily_target ?? DEFAULT_DAILY_TARGET;
+  const target = todayLog?.target ?? settings?.daily_question_goal ?? DEFAULT_DAILY_TARGET;
   const answeredToday = todayLog?.answered ?? 0;
   const streak = computeStreak((recentLogs ?? []).map((l) => l.review_date), today);
 

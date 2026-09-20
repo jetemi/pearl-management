@@ -197,6 +197,8 @@ export async function finishDailyReview(score: number, total: number, durationSe
   const user = await requireCbapUser();
   const supabase = await createClient();
 
+  // `details` is NOT NULL DEFAULT '[]' in 013 — per-question results are already
+  // in cbap_question_state, so this row is the daily summary only.
   const { error } = await supabase.from("cbap_quiz_attempts").insert({
     user_id: user.id,
     mode: "daily",
@@ -204,7 +206,7 @@ export async function finishDailyReview(score: number, total: number, durationSe
     score,
     total,
     duration_seconds: durationSeconds,
-    details: null,
+    details: [],
   });
   if (error) return { success: false as const, error: error.message };
 
@@ -220,7 +222,7 @@ export async function setDailyTarget(target: number) {
   const clamped = Math.max(5, Math.min(60, Math.round(target)));
 
   const { error } = await supabase.from("cbap_settings").upsert(
-    { user_id: user.id, daily_target: clamped, updated_at: new Date().toISOString() },
+    { user_id: user.id, daily_question_goal: clamped, updated_at: new Date().toISOString() },
     { onConflict: "user_id" }
   );
   if (error) return { success: false as const, error: error.message };

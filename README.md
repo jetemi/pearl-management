@@ -25,7 +25,13 @@ In Supabase Dashboard → SQL Editor, run the migration files in order:
 5. `supabase/migrations/005_phase4_resident_requests.sql`
 6. `supabase/migrations/006_residents_phone_fm_contacts.sql`
 7. `supabase/migrations/007_diesel_generator_accounting.sql`
-8. `supabase/migrations/008_cbap_schema.sql`
+8. `supabase/migrations/008_household_management.sql`
+9. `supabase/migrations/009_unit_obligation_windows.sql`
+10. `supabase/migrations/010_service_charge_obligations.sql`
+11. `supabase/migrations/011_default_unit_and_new_user_resident.sql`
+12. `supabase/migrations/012_unit_obligation_end_windows.sql`
+13. `supabase/migrations/013_cbap_schema.sql`
+14. `supabase/migrations/014_cbap_daily_review.sql`
 
 Or with Supabase CLI:
 
@@ -149,8 +155,9 @@ RADD 75 · RLCM 38 · SA 37 · BAPM 35 · SE 35 · EC 30  =  250
 
 ### Daily review (`/cbap/daily`)
 
-The core study loop. Each day serves a target number of questions (default 15, adjustable
-5–60 on the study plan page). Answering reveals the explanation immediately — right or wrong —
+The core study loop. Each day serves a target number of questions (`cbap_settings.daily_question_goal`,
+default 15, adjustable 5–60 on the study plan page). This is a separate queue from the
+flashcard goal (`daily_card_goal`). Answering reveals the explanation immediately — right or wrong —
 along with the BABOK task the question tests.
 
 Selection is spaced-repetition driven, reusing the same SM-2 engine as the flashcards
