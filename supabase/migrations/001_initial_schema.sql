@@ -4,7 +4,7 @@
 -- Units: flat registry
 CREATE TABLE units (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  flat_number   text NOT NULL UNIQUE,
+  flat_number   text NOT NULL,
   owner_name    text NOT NULL,
   phone         text,
   email         text,

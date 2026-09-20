@@ -49,5 +49,4 @@ yarn-error.log*
 next-env.d.ts
 
 estate-app-plan.md
-supabase/migrations/
 docs/
